@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f2a37">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="引落チェック">
+<title>引落チェック</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --bg:#f4f2ee; --card:#ffffff; --ink:#1f2a37; --sub:#6b7280; --line:#e5e1da;
+    --accent:#1f6f5c; --accent-soft:#e3f1ec; --warn:#b4232a; --warn-soft:#fbe9ea;
+    --amber:#8a5a00; --amber-soft:#fdf3dc; --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14181d; --card:#1d232a; --ink:#e8ebef; --sub:#9aa3ad; --line:#2c343d;
+      --accent:#5cc2a4; --accent-soft:#1b332c; --warn:#ff7b82; --warn-soft:#3a1f22;
+      --amber:#f2c26b; --amber-soft:#3a2f18;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;font-size:15px;line-height:1.5;
+    padding-bottom:env(safe-area-inset-bottom)}
+  .wrap{max-width:560px;margin:0 auto;padding:12px 16px 48px}
+  header.top{display:flex;justify-content:space-between;align-items:center;padding:6px 2px 10px}
+  header.top h1{font-size:17px;margin:0;letter-spacing:.04em}
+  .sync{font-size:12px;color:var(--sub)}
+  .sync.err{color:var(--warn)}
+  section{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px}
+  section h2{font-size:13px;color:var(--sub);margin:0 0 10px;font-weight:600;letter-spacing:.06em}
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  .hero{text-align:center;padding:18px 14px}
+  .hero .label{font-size:13px;color:var(--sub)}
+  .hero .big{font-size:36px;font-weight:700;margin:2px 0 6px}
+  .pos{color:var(--accent)} .neg{color:var(--warn)}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;text-align:left}
+  .stat{background:var(--bg);border-radius:10px;padding:8px 10px}
+  .stat .k{font-size:11px;color:var(--sub)} .stat .v{font-size:16px;font-weight:600}
+  .hint{font-size:12px;color:var(--sub);margin-top:8px}
+  .tl-row{display:grid;grid-template-columns:76px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
+  .tl-row:first-of-type{border-top:none}
+  .tl-date{font-weight:700}
+  .tl-cards{font-size:12px;color:var(--sub)}
+  .tl-amt{text-align:right;font-size:13px}
+  .tl-bal{font-weight:700;font-size:15px}
+  .tl-row.short{background:var(--warn-soft);margin:0 -14px;padding:9px 14px}
+  .row{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+  .row:first-of-type{border-top:none}
+  .row .name{flex:1;min-width:0}
+  .row .name .n{font-weight:600}
+  .row .name .meta{font-size:11.5px;color:var(--sub)}
+  input[type=text],input[type=password],input.money{font:inherit;color:var(--ink);background:var(--bg);
+    border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%}
+  input.money{width:120px;text-align:right;font-variant-numeric:tabular-nums}
+  input:focus{outline:2px solid var(--accent);outline-offset:0;border-color:transparent}
+  .pred{font-size:11.5px;color:var(--amber);text-align:right;margin-top:3px}
+  .pred.fixed{color:var(--accent)}
+  .toggle{font-size:12px;border:1px solid var(--line);background:var(--bg);color:var(--sub);
+    border-radius:999px;padding:4px 10px;cursor:pointer;white-space:nowrap}
+  .toggle.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+  .amtcol{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+  button{font:inherit;cursor:pointer}
+  .btn{border:none;background:var(--accent);color:#fff;border-radius:10px;padding:10px 14px;font-weight:600}
+  .btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  .btn.danger{background:transparent;color:var(--warn);border:1px solid var(--warn)}
+  .btn.small{padding:6px 10px;font-size:13px}
+  table.info{width:100%;border-collapse:collapse;font-size:13px}
+  table.info th,table.info td{padding:7px 4px;border-top:1px solid var(--line);text-align:left}
+  table.info th{color:var(--sub);font-weight:600;font-size:12px;border-top:none}
+  .note{background:var(--amber-soft);color:var(--amber);border-radius:10px;padding:8px 10px;font-size:12.5px;margin-top:10px}
+  details summary{cursor:pointer;font-weight:600;font-size:14px;list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::after{content:" ▾";color:var(--sub)}
+  .edit-row{display:grid;grid-template-columns:1fr 64px 64px 30px;gap:6px;align-items:center;margin:6px 0}
+  .edit-row.fund{grid-template-columns:1fr 30px}
+  .edit-row input,.edit-row select{font:inherit;font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%}
+  .x{border:none;background:none;color:var(--sub);font-size:18px}
+  .lock{max-width:380px;margin:12vh auto 0;padding:0 16px}
+  .lock section{padding:22px}
+  .lock label{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--sub);margin:10px 0 14px}
+  .err-msg{color:var(--warn);font-size:13px;min-height:18px;margin-top:6px}
+  .gap{height:8px}
+  .flex{display:flex;gap:8px;flex-wrap:wrap}
+  .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--line);padding:4px;border-radius:12px;margin-bottom:12px;position:sticky;top:6px;z-index:5}
+  .tabs button{border:none;background:transparent;color:var(--sub);border-radius:9px;padding:9px 6px;font-weight:600;font-size:14px;line-height:1.3}
+  .tabs button small{display:block;font-size:11px;font-weight:500}
+  .tabs button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .badge{display:inline-block;font-size:11px;border-radius:6px;padding:1px 6px;margin-left:4px;vertical-align:1px}
+  .badge.done{background:var(--line);color:var(--sub)}
+  .badge.carry{background:var(--amber-soft);color:var(--amber)}
+  .row.paid{opacity:.5}
+  .rec-top{background:var(--accent-soft);border-radius:12px;padding:12px;margin-bottom:8px}
+  .rec-top .k{font-size:12px;color:var(--accent);font-weight:600}
+  .rec-top .n{font-size:20px;font-weight:700;margin:2px 0}
+  .rec-top .m{font-size:13px}
+  .rank{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:center;padding:7px 0;border-top:1px solid var(--line);font-size:13.5px}
+  .rank .no{color:var(--sub);font-weight:700}
+  .rank .d{text-align:right;font-weight:700}
+  .rank .sub{font-size:11.5px;color:var(--sub)}
+  .warn-txt{color:var(--warn);font-size:11.5px}
+  .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* =========================================================
+   設定：Supabase（medasama-tools）の接続情報を入れてください。
+   空のままだと「この端末だけに保存」で動きます。
+   ========================================================= */
+const SUPABASE_URL = "https://edfrjxjdzxutcjeayfac.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_GVtanlT_gDwSEQSsZPC_NQ_nEK-60x2";
+const TABLE = "cashflow_store";
+
+const LS_PASS = "cf_pass";
+const LS_CACHE = "cf_cache";
+const LS_VIEW = "cf_view";
+
+/* ---------- 初期データ ---------- */
+// closing: 締め日（0 = 末日） / withdraw: 引落日（締めた月の翌月の何日）
+// marketOnly: 楽天市場での買い物専用の行（「今日使うなら」の候補から外す）
+const DEFAULT_CARDS = [
+  { id:"rakuten-ichiba", name:"楽天カード（楽天市場分）", closing:25, withdraw:27, marketOnly:true },
+  { id:"rakuten",        name:"楽天カード（市場以外）",   closing:0,  withdraw:27 },
+  { id:"saison",         name:"セディナ",     closing:0,  withdraw:27 },
+  { id:"ones",           name:"ワンズ",       closing:0,  withdraw:26 },
+  { id:"paypay",         name:"PayPayカード", closing:0,  withdraw:27 },
+  { id:"epos",           name:"エポス",       closing:4,  withdraw:4 },
+  { id:"stacia",         name:"スタシア",     closing:15, withdraw:10 },
+  { id:"jwest",          name:"J-WEST",       closing:15, withdraw:10 },
+  { id:"recruit",        name:"リクルート",   closing:15, withdraw:10 },
+];
+const DEFAULT_FUNDS = [
+  { id:"smbc",   name:"三井住友" },
+  { id:"rbank",  name:"楽天銀行" },
+  { id:"jibun",  name:"じぶん銀行" },
+  { id:"cash",   name:"現金" },
+  { id:"income", name:"入金予定" },
+  { id:"stock",  name:"株売却" },
+];
+const emptyAmt = () => ({ amt:0, end:null, carried:false });
+function freshState(){
+  return {
+    v:2,
+    cards: DEFAULT_CARDS.map(c=>({ ...c, conf:emptyAmt(), open:emptyAmt() })),
+    funds: DEFAULT_FUNDS.map(f=>({ ...f, amount:0 })),
+    nextIncome: 0,
+    updatedAt: null,
+  };
+}
+
+/* ---------- 日付計算 ---------- */
+const DAY = 86400000;
+const MIN_PRED_DAYS = 5; // 締め直後は予測がぶれるので、5日目から予測する
+function ymd(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function lastDayOf(y,m){ return new Date(y, m+1, 0).getDate(); }
+function closingDate(y,m,c){ const L=lastDayOf(y,m); return new Date(y,m,(c===0||c>L)?L:c); }
+function daysBetween(a,b){ return Math.round((ymd(b)-ymd(a))/DAY); }
+const keyOf = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+// 利用中：今日を含む締め期間
+function openCycle(today, c){
+  const y=today.getFullYear(), m=today.getMonth();
+  const cd = closingDate(y,m,c);
+  let end, prevEnd;
+  if (ymd(today) <= cd){ end = cd; prevEnd = closingDate(y,m-1,c); }
+  else { end = closingDate(y,m+1,c); prevEnd = cd; }
+  const start = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), prevEnd.getDate()+1);
+  return { start, end };
+}
+// 確定：直近で締まった締め期間
+function closedCycle(today, c){
+  const y=today.getFullYear(), m=today.getMonth();
+  let end = closingDate(y,m,c);
+  if (!(end < ymd(today))) end = closingDate(y,m-1,c);
+  const prevEnd = closingDate(end.getFullYear(), end.getMonth()-1, c);
+  const start = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), prevEnd.getDate()+1);
+  return { start, end };
+}
+function withdrawDate(closeEnd, w){
+  const y=closeEnd.getFullYear(), m=closeEnd.getMonth()+1;
+  return new Date(y, m, Math.min(w, lastDayOf(y,m)));
+}
+function schedules(card, today){
+  const cc = closedCycle(today, card.closing);
+  const oc = openCycle(today, card.closing);
+  const conf = { ...cc, withdraw: withdrawDate(cc.end, card.withdraw) };
+  conf.paid = ymd(conf.withdraw) < ymd(today);           // 引落日を過ぎた
+  const open = { ...oc, withdraw: withdrawDate(oc.end, card.withdraw) };
+  open.total = daysBetween(oc.start, oc.end) + 1;
+  open.elapsed = Math.min(open.total, Math.max(1, daysBetween(oc.start, today) + 1));
+  open.predicted = open.elapsed >= MIN_PRED_DAYS
+    ? Math.round((card.open.amt||0) * open.total / open.elapsed) : (card.open.amt||0);
+  return { conf, open };
+}
+
+// 締めをまたいだら「利用中」の金額を「確定分」へ自動で繰り越す
+function rollOver(today){
+  let changed = false;
+  state.cards.forEach(c=>{
+    const ccEnd = keyOf(closedCycle(today, c.closing).end);
+    const ocEnd = keyOf(openCycle(today, c.closing).end);
+    if (c.open.end && c.open.end !== ocEnd){
+      if (c.open.end === ccEnd && c.open.amt && !(c.conf.end === ccEnd && c.conf.amt)){
+        c.conf = { amt:c.open.amt, end:ccEnd, carried:true };
+      }
+      c.open = { amt:0, end:ocEnd, carried:false }; changed = true;
+    }
+    if (c.conf.end && c.conf.end !== ccEnd){ c.conf = { amt:0, end:ccEnd, carried:false }; changed = true; }
+    if (!c.open.end){ c.open.end = ocEnd; }
+    if (!c.conf.end){ c.conf.end = ccEnd; }
+  });
+  return changed;
+}
+
+/* ---------- 表示ヘルパ ---------- */
+const yen = n => (n<0?"−":"") + "¥" + Math.abs(Math.round(n)).toLocaleString("ja-JP");
+const md = d => `${d.getMonth()+1}/${d.getDate()}`;
+const closingLabel = c => c===0 ? "末日" : `${c}日`;
+const esc = s => String(s).replace(/[&<>"']/g, ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+const shortName = n => n.replace(/カード/,"");
+function parseYen(s){ const n = parseInt(String(s).replace(/[^\d-]/g,""),10); return isNaN(n)?0:n; }
+const fmtInput = n => n ? (+n).toLocaleString("ja-JP") : "";
+
+/* ---------- 暗号化（合言葉 → AES-GCM） ---------- */
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+async function sha256Hex(s){
+  const h = await crypto.subtle.digest("SHA-256", enc.encode(s));
+  return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+async function deriveKey(pass, salt){
+  const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2", salt, iterations:200000, hash:"SHA-256"},
+    base, {name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
+}
+async function encryptJSON(obj, pass){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(pass, salt);
+  const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, key, enc.encode(JSON.stringify(obj)));
+  return JSON.stringify({ v:1, s:b64(salt), iv:b64(iv), ct:b64(ct) });
+}
+async function decryptJSON(payload, pass){
+  const p = JSON.parse(payload);
+  const key = await deriveKey(pass, unb64(p.s));
+  const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:unb64(p.iv)}, key, unb64(p.ct));
+  return JSON.parse(dec.decode(pt));
+}
+
+/* ---------- 保存 ---------- */
+const sb = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let PASS = null, ROW_ID = null, state = null, saveTimer = null, syncMsg = "", syncErr = false;
+let VIEW = "conf";
+
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+
+async function loadWith(pass){
+  ROW_ID = await sha256Hex("cashflow-tool:" + pass);
+  let payload = null;
+  if (sb){
+    const { data, error } = await sb.from(TABLE).select("payload,updated_at").eq("id", ROW_ID).maybeSingle();
+    if (error) throw new Error("同期サーバーに接続できませんでした：" + error.message);
+    if (data) payload = data.payload;
+  }
+  if (!payload){
+    const cache = lsGet(LS_CACHE);
+    if (cache){ try{ const c = JSON.parse(cache); if (c.id === ROW_ID) payload = c.payload; }catch(e){} }
+  }
+  if (!payload) return freshState();
+  let raw;
+  try { raw = await decryptJSON(payload, pass); }
+  catch(e){ throw new Error("合言葉が違うか、データを読めませんでした。"); }
+  return migrate(raw);
+}
+function migrate(s){
+  const base = freshState();
+  if (!s || !Array.isArray(s.cards)) return base;
+  if (!s.v || s.v < 2){
+    // v1：1枠の金額＋確定フラグ → 確定分／利用中の2枠へ
+    s.cards = s.cards.map(c=>{
+      const n = { ...c, conf:emptyAmt(), open:emptyAmt() };
+      if (c.confirmed) n.conf.amt = c.amount||0; else n.open.amt = c.amount||0;
+      if (c.id === "ones" && c.withdraw === 27) n.withdraw = 26;
+      if (c.id === "rakuten-ichiba") n.marketOnly = true;
+      delete n.amount; delete n.confirmed;
+      return n;
+    });
+    s.nextIncome = 0; s.v = 2;
+  }
+  s.funds = Array.isArray(s.funds) ? s.funds : base.funds;
+  s.nextIncome = +s.nextIncome || 0;
+  return s;
+}
+function scheduleSave(){
+  clearTimeout(saveTimer);
+  setSync("保存待ち…", false);
+  saveTimer = setTimeout(saveNow, 900);
+}
+async function saveNow(){
+  state.updatedAt = new Date().toISOString();
+  try{
+    const payload = await encryptJSON(state, PASS);
+    lsSet(LS_CACHE, JSON.stringify({ id: ROW_ID, payload }));
+    if (sb){
+      const { error } = await sb.from(TABLE).upsert({ id: ROW_ID, payload, updated_at: state.updatedAt });
+      if (error) throw error;
+      setSync("同期済み " + timeStr(new Date()), false);
+    } else {
+      setSync("この端末に保存 " + timeStr(new Date()), false);
+    }
+  }catch(e){
+    setSync("同期失敗（端末には保存済み）", true);
+    console.error(e);
+  }
+}
+const timeStr = d => `${d.getHours()}:${String(d.getMinutes()).padStart(2,"0")}`;
+function setSync(msg, err){
+  syncMsg = msg; syncErr = err;
+  const el = document.getElementById("sync");
+  if (el){ el.textContent = msg; el.className = "sync" + (err?" err":""); }
+}
+
+/* ---------- 計算 ---------- */
+function buildTimeline(start, items){
+  const groups = new Map();
+  items.forEach(it=>{
+    const k = ymd(it.date).getTime();
+    if (!groups.has(k)) groups.set(k, { date:it.date, names:[], sum:0 });
+    const g = groups.get(k); g.names.push(it.name); g.sum += it.amount;
+  });
+  let bal = start;
+  return [...groups.values()].sort((a,b)=>a.date-b.date).map(g=>{ bal -= g.sum; return { ...g, balance:bal }; });
+}
+function compute(){
+  const today = new Date();
+  const fundsTotal = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
+  const rows = state.cards.map(c=>({ card:c, sch: schedules(c, today) }));
+
+  // 確定分（未引落のもの）
+  const confItems = rows.filter(r=>!r.sch.conf.paid && r.card.conf.amt)
+    .map(r=>({ date:r.sch.conf.withdraw, name:shortName(r.card.name), amount:r.card.conf.amt }));
+  const confTotal = confItems.reduce((a,i)=>a+i.amount,0);
+  const confTimeline = buildTimeline(fundsTotal, confItems);
+  const afterConf = fundsTotal - confTotal;
+
+  // 途中経過（利用中）：確定分を払った後の残高＋入金予定からスタート
+  const openStart = afterConf + (+state.nextIncome||0);
+  const openItems = rows.filter(r=>r.sch.open.predicted)
+    .map(r=>({ date:r.sch.open.withdraw, name:shortName(r.card.name), amount:r.sch.open.predicted }));
+  const openCurrent = state.cards.reduce((a,c)=>a+(+c.open.amt||0),0);
+  const openPredicted = openItems.reduce((a,i)=>a+i.amount,0);
+  const openTimeline = buildTimeline(openStart, openItems);
+
+  // 今日使うなら：引落までの日数が長い順
+  const ranking = rows.filter(r=>!r.card.marketOnly).map(r=>({
+    card:r.card, withdraw:r.sch.open.withdraw, closeEnd:r.sch.open.end,
+    days: daysBetween(today, r.sch.open.withdraw),
+    toClose: daysBetween(today, r.sch.open.end),
+  })).sort((a,b)=> b.days-a.days);
+
+  return { today, fundsTotal, rows, confTotal, confTimeline, afterConf,
+           openStart, openCurrent, openPredicted, openTimeline,
+           openOutlook: openStart - openPredicted, openRemain: openStart - openCurrent, ranking };
+}
+
+/* ---------- 画面 ---------- */
+function renderLock(errMsg=""){
+  document.getElementById("app").innerHTML = `
+  <div class="lock">
+    <section>
+      <h2>引落チェック</h2>
+      <p style="margin:0 0 12px;font-size:14px">合言葉を入力してください。初めての場合は、ここで決めた合言葉でデータが作られます。</p>
+      <input type="password" id="pass" autocomplete="current-password" placeholder="合言葉">
+      <label><input type="checkbox" id="remember" checked> この端末に合言葉を記憶する</label>
+      <button class="btn" id="open" style="width:100%">開く</button>
+      <div class="err-msg" id="err">${esc(errMsg)}</div>
+      <p class="hint">合言葉は暗号化の鍵です。忘れるとデータを復元できません。${sb ? "" : "<br>※ 同期設定が未入力のため、この端末だけに保存されます。"}</p>
+    </section>
+  </div>`;
+  const go = async ()=>{
+    const p = document.getElementById("pass").value;
+    if (!p){ document.getElementById("err").textContent = "合言葉を入力してください。"; return; }
+    document.getElementById("err").textContent = "読み込み中…";
+    try{
+      state = await loadWith(p); PASS = p;
+      if (document.getElementById("remember").checked) lsSet(LS_PASS, p); else lsDel(LS_PASS);
+      afterLoad();
+    }catch(e){ document.getElementById("err").textContent = e.message; }
+  };
+  document.getElementById("open").onclick = go;
+  document.getElementById("pass").onkeydown = e=>{ if (e.key==="Enter") go(); };
+  document.getElementById("pass").focus();
+}
+function afterLoad(){
+  setSync(sb ? "同期済み" : "この端末に保存", false);
+  if (rollOver(new Date())) scheduleSave();
+  render();
+}
+
+function timelineHTML(startLabel, start, tl){
+  return `
+    <div class="tl-row" style="padding-top:0">
+      <div class="tl-date">いま</div><div class="tl-cards">${startLabel}</div>
+      <div class="tl-amt"><div class="tl-bal num">${yen(start)}</div></div>
+    </div>
+    ${tl.length ? tl.map(g=>`
+      <div class="tl-row${g.balance<0?" short":""}">
+        <div class="tl-date num">${md(g.date)}</div>
+        <div class="tl-cards">${g.names.map(esc).join("・")}<br><span class="num">−${yen(g.sum)}</span></div>
+        <div class="tl-amt"><div class="tl-bal num ${g.balance<0?"neg":""}">${yen(g.balance)}</div></div>
+      </div>`).join("") : `<div class="hint">金額が入っていません。</div>`}
+    ${tl.some(g=>g.balance<0) ? `<div class="note">赤い日に残高が足りなくなる見込みです。</div>`:""}`;
+}
+
+function fundsHTML(){
+  return `
+    <section>
+      <h2>残高・入金予定（いま）</h2>
+      ${state.funds.map((f,i)=>`
+        <div class="row">
+          <div class="name"><div class="n">${esc(f.name)}</div></div>
+          <input class="money" inputmode="numeric" data-fund="${i}" value="${fmtInput(f.amount)}" placeholder="0">
+        </div>`).join("")}
+    </section>`;
+}
+
+function confViewHTML(r){
+  const cls = r.afterConf < 0 ? "neg" : "pos";
+  return `
+    <section class="hero">
+      <div class="label">確定分をすべて払った後の残高</div>
+      <div class="big num ${cls}">${yen(r.afterConf)}</div>
+      <div class="stats">
+        <div class="stat"><div class="k">資金合計</div><div class="v num">${yen(r.fundsTotal)}</div></div>
+        <div class="stat"><div class="k">確定分の引落合計（未引落）</div><div class="v num">${yen(r.confTotal)}</div></div>
+      </div>
+    </section>
+    <section><h2>引落の流れ（確定分）</h2>${timelineHTML("資金合計", r.fundsTotal, r.confTimeline)}</section>
+    ${fundsHTML()}
+    <section>
+      <h2>確定分の請求額（明細の確定額を入力）</h2>
+      ${r.rows.map(({card:c,sch:s},i)=>`
+        <div class="row${s.conf.paid?" paid":""}">
+          <div class="name">
+            <div class="n">${esc(c.name)}${s.conf.paid?`<span class="badge done">引落済み</span>`:""}${c.conf.carried&&!s.conf.paid?`<span class="badge carry">途中入力から繰越</span>`:""}</div>
+            <div class="meta num">${md(s.conf.start)}〜${md(s.conf.end)}締め → <b>${md(s.conf.withdraw)}引落</b></div>
+          </div>
+          <input class="money" inputmode="numeric" data-conf="${i}" value="${fmtInput(c.conf.amt)}" placeholder="0">
+        </div>`).join("")}
+      <div class="hint">「途中入力から繰越」は、締め前に途中経過タブで入れた額が自動で移ったものです。明細の確定額で上書きしてください。引落日を過ぎたカードは計算から外します。</div>
+    </section>`;
+}
+
+function openViewHTML(r){
+  const cls = r.openOutlook < 0 ? "neg" : "pos";
+  return `
+    <section class="hero">
+      <div class="label">次回の引落後の見込み収支（予測）</div>
+      <div class="big num ${cls}">${yen(r.openOutlook)}</div>
+      <div class="stats">
+        <div class="stat"><div class="k">スタート資金</div><div class="v num">${yen(r.openStart)}</div></div>
+        <div class="stat"><div class="k">予測引落合計</div><div class="v num">${yen(r.openPredicted)}</div></div>
+        <div class="stat"><div class="k">今の利用額合計</div><div class="v num">${yen(r.openCurrent)}</div></div>
+        <div class="stat"><div class="k">あと使える（今の利用額ベース）</div><div class="v num ${r.openRemain<0?"neg":""}">${yen(r.openRemain)}</div></div>
+      </div>
+      <div class="hint">スタート資金＝確定分を払った後の残高（${yen(r.afterConf)}）＋それまでの入金予定。<br>予測＝今の利用額 ÷ 経過日数 × 締めまでの日数（締めてから4日目までは入力額のまま）。</div>
+    </section>
+
+    ${rankingHTML(r)}
+
+    <section>
+      <h2>引落の流れ（途中経過）</h2>
+      ${timelineHTML("スタート資金", r.openStart, r.openTimeline)}
+    </section>
+
+    <section>
+      <h2>確定分の引落後〜次回までの入金予定</h2>
+      <div class="row">
+        <div class="name"><div class="n">入金予定</div><div class="meta">例：来月の入金など</div></div>
+        <input class="money" inputmode="numeric" data-next="1" value="${fmtInput(state.nextIncome)}" placeholder="0">
+      </div>
+    </section>
+
+    <section>
+      <h2>今の利用額（アプリの明細を見て入力）</h2>
+      ${r.rows.map(({card:c,sch:s},i)=>`
+        <div class="row">
+          <div class="name">
+            <div class="n">${esc(c.name)}</div>
+            <div class="meta num">利用中：${md(s.open.start)}〜${md(s.open.end)}（${s.open.elapsed}/${s.open.total}日目）→ <b>${md(s.open.withdraw)}引落</b></div>
+          </div>
+          <div class="amtcol">
+            <input class="money" inputmode="numeric" data-open="${i}" value="${fmtInput(c.open.amt)}" placeholder="0">
+            <div class="pred num">${s.open.elapsed < MIN_PRED_DAYS ? "予測は"+MIN_PRED_DAYS+"日目から" : "予測 "+yen(s.open.predicted)}</div>
+          </div>
+        </div>`).join("")}
+    </section>`;
+}
+
+function rankingHTML(r){
+  if (!r.ranking.length) return "";
+  const top = r.ranking[0];
+  return `
+    <section>
+      <h2>今日カードを使うなら</h2>
+      <div class="rec-top">
+        <div class="k">いちばん支払いが先になるカード</div>
+        <div class="n">${esc(top.card.name)}</div>
+        <div class="m num">${md(top.withdraw)}引落（${top.days}日後）・締めまであと${top.toClose}日</div>
+      </div>
+      ${r.ranking.map((x,i)=>`
+        <div class="rank">
+          <div class="no">${i+1}</div>
+          <div><div>${esc(x.card.name)}</div>
+            <div class="sub num">締め ${md(x.closeEnd)}（あと${x.toClose}日）</div></div>
+          <div class="d num">${md(x.withdraw)}<div class="sub">${x.days}日後</div></div>
+        </div>`).join("")}
+      <div class="hint">今日使った分が引き落とされる日が遅い順です。どのカードで払っても最終的な残高は同じ額だけ減ります。変わるのは引落の時期（入金を待てる日数）だけです。楽天市場での買い物は楽天カード（楽天市場分）の締め日（25日）が適用されます。</div>
+      ${r.openOutlook<0?`<div class="note">今の見込みでは次回の引落後にマイナスです。カードを選び直しても解消しないため、入金か支出を減らす対応が必要です。</div>`:""}
+    </section>`;
+}
+
+function render(){
+  const r = compute();
+  const app = document.getElementById("app");
+  const openDetails = [...document.querySelectorAll("details[open]")].map(d=>d.id);
+  const scrollY = window.scrollY;
+
+  app.innerHTML = `
+  <div class="wrap">
+    <header class="top">
+      <h1>引落チェック</h1>
+      <span id="sync" class="sync${syncErr?" err":""}">${esc(syncMsg)}</span>
+    </header>
+
+    <div class="tabs">
+      <button data-view="conf" class="${VIEW==="conf"?"on":""}">確定分<small>今月の引落</small></button>
+      <button data-view="open" class="${VIEW==="open"?"on":""}">途中経過<small>来月の引落</small></button>
+    </div>
+
+    ${VIEW==="conf" ? confViewHTML(r) : openViewHTML(r)}
+
+    <section>
+      <h2>締め日・引落日一覧</h2>
+      <table class="info">
+        <tr><th>カード</th><th>締め日</th><th>引落日</th></tr>
+        ${state.cards.map(c=>`<tr><td>${esc(c.name)}</td><td>${closingLabel(c.closing)}</td><td>翌月${c.withdraw}日</td></tr>`).join("")}
+      </table>
+      <div class="note">楽天カードは締め日が2つあります。楽天市場での買い物は25日締め、それ以外は末日締め（どちらも翌月27日引落）。明細を見て2行に分けて入力してください。</div>
+    </section>
+
+    <section>
+      <details id="d-settings">
+        <summary>設定</summary>
+        <div class="gap"></div>
+        <h2>カード（名前・締め日・引落日）</h2>
+        <div class="hint" style="margin:0 0 4px">締め日は 0 で末日。引落日は締めた月の翌月の日付。</div>
+        ${state.cards.map((c,i)=>`
+          <div class="edit-row">
+            <input type="text" value="${esc(c.name)}" data-cname="${i}">
+            <input type="number" min="0" max="31" value="${c.closing}" data-cclose="${i}" title="締め日（0=末日）">
+            <input type="number" min="1" max="31" value="${c.withdraw}" data-cwd="${i}" title="引落日">
+            <button class="x" data-cdel="${i}" title="削除">×</button>
+          </div>`).join("")}
+        <button class="btn ghost small" id="add-card">＋ カードを追加</button>
+
+        <div class="gap"></div><div class="gap"></div>
+        <h2>残高・入金の項目</h2>
+        ${state.funds.map((f,i)=>`
+          <div class="edit-row fund">
+            <input type="text" value="${esc(f.name)}" data-fname="${i}">
+            <button class="x" data-fdel="${i}" title="削除">×</button>
+          </div>`).join("")}
+        <button class="btn ghost small" id="add-fund">＋ 項目を追加</button>
+
+        <div class="gap"></div><div class="gap"></div>
+        <div class="flex">
+          <button class="btn danger small" id="reset-cards">カードの金額をすべて0に戻す</button>
+          <button class="btn ghost small" id="lock">合言葉の記憶を消して閉じる</button>
+        </div>
+        <p class="hint">${sb ? "データは合言葉で暗号化して同期しています。" : "同期設定が未入力のため、この端末だけに保存しています。"}${state.updatedAt ? "<br>最終保存：" + new Date(state.updatedAt).toLocaleString("ja-JP") : ""}</p>
+      </details>
+    </section>
+  </div>`;
+
+  openDetails.forEach(id=>{ const d=document.getElementById(id); if(d) d.open=true; });
+  window.scrollTo(0, scrollY);
+  bind();
+}
+
+function bind(){
+  const app = document.getElementById("app");
+  const today = new Date();
+  app.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{
+    VIEW = b.dataset.view; lsSet(LS_VIEW, VIEW); render(); window.scrollTo(0,0);
+  });
+  app.querySelectorAll("input.money").forEach(el=>{
+    el.addEventListener("focus", ()=>{ el.value = el.value.replace(/,/g,""); el.select(); });
+    const commit = ()=>{
+      const v = parseYen(el.value);
+      if (el.dataset.fund !== undefined) state.funds[+el.dataset.fund].amount = v;
+      if (el.dataset.conf !== undefined){
+        const c = state.cards[+el.dataset.conf];
+        c.conf = { amt:v, end:keyOf(closedCycle(today, c.closing).end), carried:false };
+      }
+      if (el.dataset.open !== undefined){
+        const c = state.cards[+el.dataset.open];
+        c.open = { amt:v, end:keyOf(openCycle(today, c.closing).end), carried:false };
+      }
+      if (el.dataset.next !== undefined) state.nextIncome = v;
+      scheduleSave(); render();
+    };
+    el.addEventListener("change", commit);
+    el.addEventListener("keydown", e=>{ if (e.key==="Enter") el.blur(); });
+  });
+  const onEdit = (sel, fn)=>app.querySelectorAll(sel).forEach(el=>el.addEventListener("change", ()=>{
+    fn(el); rollOver(new Date()); scheduleSave(); render();
+  }));
+  onEdit("[data-cname]", el=>state.cards[+el.dataset.cname].name = el.value.trim() || "カード");
+  onEdit("[data-cclose]", el=>state.cards[+el.dataset.cclose].closing = Math.min(31, Math.max(0, parseInt(el.value,10)||0)));
+  onEdit("[data-cwd]", el=>state.cards[+el.dataset.cwd].withdraw = Math.min(31, Math.max(1, parseInt(el.value,10)||1)));
+  onEdit("[data-fname]", el=>state.funds[+el.dataset.fname].name = el.value.trim() || "項目");
+  app.querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{
+    const c = state.cards[+b.dataset.cdel];
+    if (confirm(`「${c.name}」を削除しますか？`)){ state.cards.splice(+b.dataset.cdel,1); scheduleSave(); render(); }
+  });
+  app.querySelectorAll("[data-fdel]").forEach(b=>b.onclick=()=>{
+    const f = state.funds[+b.dataset.fdel];
+    if (confirm(`「${f.name}」を削除しますか？`)){ state.funds.splice(+b.dataset.fdel,1); scheduleSave(); render(); }
+  });
+  document.getElementById("add-card").onclick = ()=>{
+    state.cards.push({ id:"c"+Date.now(), name:"新しいカード", closing:0, withdraw:27, conf:emptyAmt(), open:emptyAmt() });
+    rollOver(new Date()); scheduleSave(); render();
+  };
+  document.getElementById("add-fund").onclick = ()=>{
+    state.funds.push({ id:"f"+Date.now(), name:"新しい項目", amount:0 }); scheduleSave(); render();
+  };
+  document.getElementById("reset-cards").onclick = ()=>{
+    if (confirm("カードの確定分・利用中の金額をすべて0に戻しますか？（残高はそのまま）")){
+      state.cards.forEach(c=>{ c.conf.amt=0; c.conf.carried=false; c.open.amt=0; });
+      scheduleSave(); render();
+    }
+  };
+  document.getElementById("lock").onclick = ()=>{ lsDel(LS_PASS); PASS=null; state=null; renderLock(); };
+}
+
+/* ---------- 起動 ---------- */
+VIEW = lsGet(LS_VIEW) === "open" ? "open" : "conf";
+(async ()=>{
+  const saved = lsGet(LS_PASS);
+  if (saved){
+    try{ state = await loadWith(saved); PASS = saved; afterLoad(); return; }
+    catch(e){ renderLock(e.message); return; }
+  }
+  renderLock();
+})();
+
+// 他の端末で更新された分を、画面に戻ったときに取り込む（日付またぎの繰越もここで行う）
+document.addEventListener("visibilitychange", async ()=>{
+  if (document.visibilityState !== "visible" || !PASS) return;
+  if (document.activeElement && document.activeElement.classList.contains("money")) return;
+  try{
+    if (sb){
+      const fresh = await loadWith(PASS);
+      if (fresh.updatedAt && (!state.updatedAt || fresh.updatedAt > state.updatedAt)){
+        state = fresh; setSync("最新を取り込みました", false);
+      }
+    }
+    if (rollOver(new Date())) scheduleSave();
+    render();
+  }catch(e){}
+});
+</script>
+</body>
+</html>
