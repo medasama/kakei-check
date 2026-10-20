@@ -85,7 +85,7 @@
   .err-msg{color:var(--warn);font-size:13px;min-height:18px;margin-top:6px}
   .gap{height:8px}
   .flex{display:flex;gap:8px;flex-wrap:wrap}
-  .tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--line);padding:4px;border-radius:12px;margin-bottom:12px;position:sticky;top:6px;z-index:5}
+  .tabs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;background:var(--line);padding:4px;border-radius:12px;margin-bottom:12px;position:sticky;top:6px;z-index:5}
   .tabs button{border:none;background:transparent;color:var(--sub);border-radius:9px;padding:9px 6px;font-weight:600;font-size:14px;line-height:1.3}
   .tabs button small{display:block;font-size:11px;font-weight:500}
   .tabs button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
@@ -102,6 +102,17 @@
   .rank .d{text-align:right;font-weight:700}
   .rank .sub{font-size:11.5px;color:var(--sub)}
   .warn-txt{color:var(--warn);font-size:11.5px}
+  .sim-in{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .sim-in label{font-size:12px;color:var(--sub);display:block;margin-bottom:4px}
+  .sim-in input{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%}
+  .sim-card{padding:10px 0;border-top:1px solid var(--line)}
+  .sim-card:first-of-type{border-top:none}
+  .sim-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .sim-head .n{font-weight:600}
+  .sim-head .w{font-weight:700;font-size:17px;white-space:nowrap}
+  .sim-sub{font-size:12px;color:var(--sub)}
+  .sim-tip{font-size:12.5px;margin-top:4px;background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:5px 8px}
+  .sim-out{font-size:12px;margin-top:3px}
   .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
 </style>
 </head>
@@ -353,24 +364,17 @@ function compute(){
   const confTimeline = buildTimeline(fundsTotal, confItems);
   const afterConf = fundsTotal - confTotal;
 
-  // 途中経過（利用中）：確定分を払った後の残高＋入金予定からスタート
-  const openStart = afterConf + (+state.nextIncome||0);
+  // 途中経過（利用中）：確定分の残高は引き継がず、0円＋入金予定からスタート
+  const openStart = +state.nextIncome||0;
   const openItems = rows.filter(r=>r.sch.open.predicted)
     .map(r=>({ date:r.sch.open.withdraw, name:shortName(r.card.name), amount:r.sch.open.predicted }));
   const openCurrent = state.cards.reduce((a,c)=>a+(+c.open.amt||0),0);
   const openPredicted = openItems.reduce((a,i)=>a+i.amount,0);
   const openTimeline = buildTimeline(openStart, openItems);
 
-  // 今日使うなら：引落までの日数が長い順
-  const ranking = rows.filter(r=>!r.card.marketOnly).map(r=>({
-    card:r.card, withdraw:r.sch.open.withdraw, closeEnd:r.sch.open.end,
-    days: daysBetween(today, r.sch.open.withdraw),
-    toClose: daysBetween(today, r.sch.open.end),
-  })).sort((a,b)=> b.days-a.days);
-
   return { today, fundsTotal, rows, confTotal, confTimeline, afterConf,
            openStart, openCurrent, openPredicted, openTimeline,
-           openOutlook: openStart - openPredicted, openRemain: openStart - openCurrent, ranking };
+           openOutlook: openStart - openPredicted, openRemain: openStart - openCurrent };
 }
 
 /* ---------- 画面 ---------- */
@@ -473,18 +477,17 @@ function openViewHTML(r){
         <div class="stat"><div class="k">今の利用額合計</div><div class="v num">${yen(r.openCurrent)}</div></div>
         <div class="stat"><div class="k">あと使える（今の利用額ベース）</div><div class="v num ${r.openRemain<0?"neg":""}">${yen(r.openRemain)}</div></div>
       </div>
-      <div class="hint">スタート資金＝確定分を払った後の残高（${yen(r.afterConf)}）＋それまでの入金予定。<br>予測＝今の利用額 ÷ 経過日数 × 締めまでの日数（締めてから4日目までは入力額のまま）。</div>
+      <div class="hint">確定分の残高は引き継がず、0円からスタート（入金予定を入れた場合はその額から）。<br>予測＝今の利用額 ÷ 経過日数 × 締めまでの日数（締めてから4日目までは入力額のまま）。</div>
     </section>
 
-    ${rankingHTML(r)}
 
     <section>
       <h2>引落の流れ（途中経過）</h2>
-      ${timelineHTML("スタート資金", r.openStart, r.openTimeline)}
+      ${timelineHTML("スタート（0円＋入金予定）", r.openStart, r.openTimeline)}
     </section>
 
     <section>
-      <h2>確定分の引落後〜次回までの入金予定</h2>
+      <h2>次回の引落までの入金予定</h2>
       <div class="row">
         <div class="name"><div class="n">入金予定</div><div class="meta">例：来月の入金など</div></div>
         <input class="money" inputmode="numeric" data-next="1" value="${fmtInput(state.nextIncome)}" placeholder="0">
@@ -507,26 +510,49 @@ function openViewHTML(r){
     </section>`;
 }
 
-function rankingHTML(r){
-  if (!r.ranking.length) return "";
-  const top = r.ranking[0];
+// 「いつ払い？」：購入日ごとの引落日
+let SIM_DATE = null, SIM_AMT = 0;
+function parseDateInput(v){ const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v||""); return m ? new Date(+m[1],+m[2]-1,+m[3]) : null; }
+function purchaseInfo(card, pd){
+  const cyc = openCycle(pd, card.closing);                 // 購入日を含む締め期間
+  const wd = withdrawDate(cyc.end, card.withdraw);
+  const nextStart = new Date(cyc.end.getFullYear(), cyc.end.getMonth(), cyc.end.getDate()+1);
+  const nextWd = withdrawDate(openCycle(nextStart, card.closing).end, card.withdraw);
+  return { closeEnd:cyc.end, withdraw:wd, days:daysBetween(pd, wd),
+           nextStart, nextWd, wait:daysBetween(pd, nextStart) };
+}
+function simHTML(r){
+  const pd = SIM_DATE || ymd(r.today);
+  const list = state.cards.map(c=>({ card:c, ...purchaseInfo(c, pd) }))
+    .sort((a,b)=> b.withdraw-a.withdraw);
+  const best = list[0];
   return `
     <section>
-      <h2>今日カードを使うなら</h2>
-      <div class="rec-top">
-        <div class="k">いちばん支払いが先になるカード</div>
-        <div class="n">${esc(top.card.name)}</div>
-        <div class="m num">${md(top.withdraw)}引落（${top.days}日後）・締めまであと${top.toClose}日</div>
+      <h2>このカードでいつ買うと、いつの引落？</h2>
+      <div class="sim-in">
+        <div><label for="sim-date">購入日</label><input type="date" id="sim-date" value="${keyOf(pd)}"></div>
+        <div><label for="sim-amt">金額（任意）</label><input type="text" inputmode="numeric" id="sim-amt" value="${fmtInput(SIM_AMT)}" placeholder="0"></div>
       </div>
-      ${r.ranking.map((x,i)=>`
-        <div class="rank">
-          <div class="no">${i+1}</div>
-          <div><div>${esc(x.card.name)}</div>
-            <div class="sub num">締め ${md(x.closeEnd)}（あと${x.toClose}日）</div></div>
-          <div class="d num">${md(x.withdraw)}<div class="sub">${x.days}日後</div></div>
-        </div>`).join("")}
-      <div class="hint">今日使った分が引き落とされる日が遅い順です。どのカードで払っても最終的な残高は同じ額だけ減ります。変わるのは引落の時期（入金を待てる日数）だけです。楽天市場での買い物は楽天カード（楽天市場分）の締め日（25日）が適用されます。</div>
-      ${r.openOutlook<0?`<div class="note">今の見込みでは次回の引落後にマイナスです。カードを選び直しても解消しないため、入金か支出を減らす対応が必要です。</div>`:""}
+      ${best ? `<div class="hint">${md(pd)}に買うなら、引落がいちばん遅いのは <b>${esc(best.card.name)}</b>（${md(best.withdraw)}・${best.days}日後）です。</div>` : ""}
+    </section>
+    <section>
+      <h2>カード別（引落が遅い順）</h2>
+      ${list.map(x=>{
+        const inCurrent = keyOf(x.closeEnd) === keyOf(openCycle(r.today, x.card.closing).end);
+        let out = "";
+        if (SIM_AMT){
+          out = inCurrent
+            ? `<div class="sim-out num">買った後の見込み収支（途中経過）：<b class="${r.openOutlook-SIM_AMT<0?"neg":""}">${yen(r.openOutlook - SIM_AMT)}</b></div>`
+            : `<div class="sim-out sub sim-sub">今集計している期間より後の引落です（途中経過には含まれません）</div>`;
+        }
+        return `
+        <div class="sim-card">
+          <div class="sim-head"><div class="n">${esc(x.card.name)}</div><div class="w num">${md(x.withdraw)}引落</div></div>
+          <div class="sim-sub num">${md(pd)}購入 → ${md(x.closeEnd)}締め → ${md(x.withdraw)}引落（${x.days}日後）</div>
+          <div class="sim-tip num">あと${x.wait}日待って <b>${md(x.nextStart)}</b> 以降に買えば → <b>${md(x.nextWd)}引落</b>（${daysBetween(x.withdraw, x.nextWd)}日先送り）</div>
+          ${out}
+        </div>`;}).join("")}
+      <div class="hint">締め日の翌日に買うと、引落はまるまる1か月先になります。楽天市場での買い物は「楽天カード（楽天市場分）」の行（25日締め）を見てください。</div>
     </section>`;
 }
 
@@ -546,9 +572,10 @@ function render(){
     <div class="tabs">
       <button data-view="conf" class="${VIEW==="conf"?"on":""}">確定分<small>今月の引落</small></button>
       <button data-view="open" class="${VIEW==="open"?"on":""}">途中経過<small>来月の引落</small></button>
+      <button data-view="sim" class="${VIEW==="sim"?"on":""}">いつ払い？<small>買う日で確認</small></button>
     </div>
 
-    ${VIEW==="conf" ? confViewHTML(r) : openViewHTML(r)}
+    ${VIEW==="conf" ? confViewHTML(r) : VIEW==="open" ? openViewHTML(r) : simHTML(r)}
 
     <section>
       <h2>締め日・引落日一覧</h2>
@@ -604,6 +631,14 @@ function bind(){
   app.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{
     VIEW = b.dataset.view; lsSet(LS_VIEW, VIEW); render(); window.scrollTo(0,0);
   });
+  const sd = document.getElementById("sim-date");
+  if (sd) sd.addEventListener("change", ()=>{ SIM_DATE = parseDateInput(sd.value); render(); });
+  const sa = document.getElementById("sim-amt");
+  if (sa){
+    sa.addEventListener("focus", ()=>{ sa.value = sa.value.replace(/,/g,""); sa.select(); });
+    sa.addEventListener("change", ()=>{ SIM_AMT = parseYen(sa.value); render(); });
+    sa.addEventListener("keydown", e=>{ if (e.key==="Enter") sa.blur(); });
+  }
   app.querySelectorAll("input.money").forEach(el=>{
     el.addEventListener("focus", ()=>{ el.value = el.value.replace(/,/g,""); el.select(); });
     const commit = ()=>{
@@ -655,7 +690,7 @@ function bind(){
 }
 
 /* ---------- 起動 ---------- */
-VIEW = lsGet(LS_VIEW) === "open" ? "open" : "conf";
+VIEW = ["conf","open","sim"].includes(lsGet(LS_VIEW)) ? lsGet(LS_VIEW) : "conf";
 (async ()=>{
   const saved = lsGet(LS_PASS);
   if (saved){
