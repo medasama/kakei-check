@@ -170,7 +170,6 @@ function freshState(){
 
 /* ---------- 日付計算 ---------- */
 const DAY = 86400000;
-const MIN_PRED_DAYS = 5; // 締め直後は予測がぶれるので、5日目から予測する
 function ymd(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function lastDayOf(y,m){ return new Date(y, m+1, 0).getDate(); }
 function closingDate(y,m,c){ const L=lastDayOf(y,m); return new Date(y,m,(c===0||c>L)?L:c); }
@@ -208,8 +207,7 @@ function schedules(card, today){
   const open = { ...oc, withdraw: withdrawDate(oc.end, card.withdraw) };
   open.total = daysBetween(oc.start, oc.end) + 1;
   open.elapsed = Math.min(open.total, Math.max(1, daysBetween(oc.start, today) + 1));
-  open.predicted = open.elapsed >= MIN_PRED_DAYS
-    ? Math.round((card.open.amt||0) * open.total / open.elapsed) : (card.open.amt||0);
+  open.predicted = card.open.amt || 0;   // 引落目安額＝入力した利用額そのもの
   return { conf, open };
 }
 
@@ -394,7 +392,7 @@ function compute(){
 
   return { today, fundsTotal, rows, confTotal, confTimeline, afterConf,
            openStart, openCurrent, openPredicted, openTimeline,
-           openOutlook: openStart - openPredicted, openRemain: openStart - openCurrent };
+           openOutlook: openStart - openPredicted };
 }
 
 /* ---------- 画面 ---------- */
@@ -503,15 +501,13 @@ function openViewHTML(r){
   const cls = r.openOutlook < 0 ? "neg" : "pos";
   return `
     <section class="hero">
-      <div class="label">次回の引落後の見込み収支（予測）</div>
+      <div class="label">次回の引落後の見込み収支（＝あと使える額）</div>
       <div class="big num ${cls}">${yen(r.openOutlook)}</div>
       <div class="stats">
         <div class="stat"><div class="k">資金合計（仮）</div><div class="v num">${yen(r.openStart)}</div></div>
-        <div class="stat"><div class="k">予測引落合計</div><div class="v num">${yen(r.openPredicted)}</div></div>
-        <div class="stat"><div class="k">今の利用額合計</div><div class="v num">${yen(r.openCurrent)}</div></div>
-        <div class="stat"><div class="k">あと使える（今の利用額ベース）</div><div class="v num ${r.openRemain<0?"neg":""}">${yen(r.openRemain)}</div></div>
+        <div class="stat"><div class="k">引落目安額の合計</div><div class="v num">${yen(r.openPredicted)}</div></div>
       </div>
-      <div class="hint">資金合計（仮）＝下の「残高・入金予定（仮）」の合計。確定分タブの残高は引き継ぎません。<br>予測＝今の利用額 ÷ 経過日数 × 締めまでの日数（締めてから4日目までは入力額のまま）。</div>
+      <div class="hint">資金合計（仮）＝下の「残高・入金予定（仮）」の合計。確定分タブの残高は引き継ぎません。<br>見込み収支＝資金合計（仮） − 引落目安額の合計（＝今入力している利用額の合計）。</div>
     </section>
 
 
@@ -523,17 +519,14 @@ function openViewHTML(r){
     ${fundsHTML("open")}
 
     <section>
-      <h2>今の利用額（アプリの明細を見て入力）</h2>
+      <h2>引落目安額（今の利用額をアプリの明細を見て入力）</h2>
       ${r.rows.map(({card:c,sch:s},i)=>`
         <div class="row">
           <div class="name">
             <div class="n">${esc(c.name)}</div>
             <div class="meta num">利用中：${md(s.open.start)}〜${md(s.open.end)}（${s.open.elapsed}/${s.open.total}日目）→ <b>${md(s.open.withdraw)}引落</b></div>
           </div>
-          <div class="amtcol">
-            <input class="money" inputmode="numeric" data-open="${i}" value="${fmtInput(c.open.amt)}" placeholder="0">
-            <div class="pred num">${s.open.elapsed < MIN_PRED_DAYS ? "予測は"+MIN_PRED_DAYS+"日目から" : "予測 "+yen(s.open.predicted)}</div>
-          </div>
+          <input class="money" inputmode="numeric" data-open="${i}" value="${fmtInput(c.open.amt)}" placeholder="0">
         </div>`).join("")}
     </section>`;
 }
