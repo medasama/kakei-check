@@ -113,6 +113,9 @@
   .sim-sub{font-size:12px;color:var(--sub)}
   .sim-tip{font-size:12.5px;margin-top:4px;background:var(--accent-soft);color:var(--accent);border-radius:8px;padding:5px 8px}
   .sim-out{font-size:12px;margin-top:3px}
+  .inc-head{font-size:12px;color:var(--sub);font-weight:600;margin:12px 0 2px}
+  .inc-row{display:grid;grid-template-columns:1fr 120px 28px;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+  .inc-row input.memo{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%;min-width:0}
   .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
 </style>
 </head>
@@ -151,7 +154,6 @@ const DEFAULT_FUNDS = [
   { id:"rbank",  name:"楽天銀行" },
   { id:"jibun",  name:"じぶん銀行" },
   { id:"cash",   name:"現金" },
-  { id:"income", name:"入金予定" },
   { id:"stock",  name:"株売却" },
 ];
 const emptyAmt = () => ({ amt:0, end:null, carried:false });
@@ -159,8 +161,9 @@ function freshState(){
   return {
     v:2,
     cards: DEFAULT_CARDS.map(c=>({ ...c, conf:emptyAmt(), open:emptyAmt() })),
-    funds: DEFAULT_FUNDS.map(f=>({ ...f, amount:0 })),
-    nextIncome: 0,
+    funds: DEFAULT_FUNDS.map(f=>({ ...f, amount:0, openAmount:0 })),
+    incomes: [],       // 確定分タブの入金予定（複数）
+    openIncomes: [],   // 途中経過タブの入金予定（仮・複数）
     updatedAt: null,
   };
 }
@@ -306,10 +309,26 @@ function migrate(s){
       delete n.amount; delete n.confirmed;
       return n;
     });
-    s.nextIncome = 0; s.v = 2;
+    s.v = 2;
   }
   s.funds = Array.isArray(s.funds) ? s.funds : base.funds;
-  s.nextIncome = +s.nextIncome || 0;
+  // 途中経過用の（仮）残高・入金予定。旧版の「入金予定」1欄は入金予定の行へ移す
+  s.funds.forEach(f=>{ f.openAmount = +f.openAmount || 0; });
+  if (+s.nextIncome){
+    const inc = s.funds.find(f=>f.id==="income") || s.funds[s.funds.length-1];
+    if (inc) inc.openAmount += +s.nextIncome;
+  }
+  delete s.nextIncome;
+  // 入金予定：残高の項目から切り出して、複数件のリストに
+  s.incomes = Array.isArray(s.incomes) ? s.incomes : [];
+  s.openIncomes = Array.isArray(s.openIncomes) ? s.openIncomes : [];
+  const incIdx = s.funds.findIndex(f=>f.id==="income");
+  if (incIdx >= 0){
+    const f = s.funds[incIdx];
+    if (+f.amount) s.incomes.push({ id:"i"+Date.now(), name:"入金予定", amount:+f.amount });
+    if (+f.openAmount) s.openIncomes.push({ id:"o"+Date.now(), name:"入金予定", amount:+f.openAmount });
+    s.funds.splice(incIdx, 1);
+  }
   return s;
 }
 function scheduleSave(){
@@ -354,7 +373,8 @@ function buildTimeline(start, items){
 }
 function compute(){
   const today = new Date();
-  const fundsTotal = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
+  const sumInc = list => list.reduce((a,x)=>a+(+x.amount||0),0);
+  const fundsTotal = state.funds.reduce((a,f)=>a+(+f.amount||0),0) + sumInc(state.incomes);
   const rows = state.cards.map(c=>({ card:c, sch: schedules(c, today) }));
 
   // 確定分（未引落のもの）
@@ -364,8 +384,8 @@ function compute(){
   const confTimeline = buildTimeline(fundsTotal, confItems);
   const afterConf = fundsTotal - confTotal;
 
-  // 途中経過（利用中）：確定分の残高は引き継がず、0円＋入金予定からスタート
-  const openStart = +state.nextIncome||0;
+  // 途中経過（利用中）：確定分とは別に入れた（仮）の残高・入金予定からスタート
+  const openStart = state.funds.reduce((a,f)=>a+(+f.openAmount||0),0) + sumInc(state.openIncomes);
   const openItems = rows.filter(r=>r.sch.open.predicted)
     .map(r=>({ date:r.sch.open.withdraw, name:shortName(r.card.name), amount:r.sch.open.predicted }));
   const openCurrent = state.cards.reduce((a,c)=>a+(+c.open.amt||0),0);
@@ -426,15 +446,29 @@ function timelineHTML(startLabel, start, tl){
     ${tl.some(g=>g.balance<0) ? `<div class="note">赤い日に残高が足りなくなる見込みです。</div>`:""}`;
 }
 
-function fundsHTML(){
+const incList = mode => mode === "open" ? state.openIncomes : state.incomes;
+function fundsHTML(mode){
+  const isOpen = mode === "open";
+  const list = incList(mode);
   return `
     <section>
-      <h2>残高・入金予定（いま）</h2>
+      <h2>${isOpen ? "残高・入金予定（仮）" : "残高・入金予定（いま）"}</h2>
+      <div class="inc-head" style="margin-top:0">残高</div>
+      ${isOpen ? `<div class="hint" style="margin:0 0 6px">次回の引落時点の見込みを入れてください。確定分タブの金額とは別に保存します。</div>` : ""}
       ${state.funds.map((f,i)=>`
         <div class="row">
-          <div class="name"><div class="n">${esc(f.name)}</div></div>
-          <input class="money" inputmode="numeric" data-fund="${i}" value="${fmtInput(f.amount)}" placeholder="0">
+          <div class="name"><div class="n">${esc(f.name)}${isOpen?"（仮）":""}</div></div>
+          <input class="money" inputmode="numeric" ${isOpen?`data-ofund="${i}"`:`data-fund="${i}"`} value="${fmtInput(isOpen ? f.openAmount : f.amount)}" placeholder="0">
         </div>`).join("")}
+      <div class="inc-head">入金予定${isOpen?"（仮）":""}</div>
+      ${list.map((x,i)=>`
+        <div class="inc-row">
+          <input type="text" class="memo" data-iname="${i}" data-list="${mode}" value="${esc(x.name)}" placeholder="メモ（例：母入金）">
+          <input class="money" inputmode="numeric" data-inc="${i}" data-list="${mode}" value="${fmtInput(x.amount)}" placeholder="0">
+          <button class="x" data-idel="${i}" data-list="${mode}" title="削除">×</button>
+        </div>`).join("")}
+      <button class="btn ghost small" data-iadd="${mode}" style="margin-top:6px">＋ 入金予定を追加</button>
+      ${list.length ? `<div class="hint">入金予定の合計：${yen(list.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
     </section>`;
 }
 
@@ -450,7 +484,7 @@ function confViewHTML(r){
       </div>
     </section>
     <section><h2>引落の流れ（確定分）</h2>${timelineHTML("資金合計", r.fundsTotal, r.confTimeline)}</section>
-    ${fundsHTML()}
+    ${fundsHTML("conf")}
     <section>
       <h2>確定分の請求額（明細の確定額を入力）</h2>
       ${r.rows.map(({card:c,sch:s},i)=>`
@@ -472,27 +506,21 @@ function openViewHTML(r){
       <div class="label">次回の引落後の見込み収支（予測）</div>
       <div class="big num ${cls}">${yen(r.openOutlook)}</div>
       <div class="stats">
-        <div class="stat"><div class="k">スタート資金</div><div class="v num">${yen(r.openStart)}</div></div>
+        <div class="stat"><div class="k">資金合計（仮）</div><div class="v num">${yen(r.openStart)}</div></div>
         <div class="stat"><div class="k">予測引落合計</div><div class="v num">${yen(r.openPredicted)}</div></div>
         <div class="stat"><div class="k">今の利用額合計</div><div class="v num">${yen(r.openCurrent)}</div></div>
         <div class="stat"><div class="k">あと使える（今の利用額ベース）</div><div class="v num ${r.openRemain<0?"neg":""}">${yen(r.openRemain)}</div></div>
       </div>
-      <div class="hint">確定分の残高は引き継がず、0円からスタート（入金予定を入れた場合はその額から）。<br>予測＝今の利用額 ÷ 経過日数 × 締めまでの日数（締めてから4日目までは入力額のまま）。</div>
+      <div class="hint">資金合計（仮）＝下の「残高・入金予定（仮）」の合計。確定分タブの残高は引き継ぎません。<br>予測＝今の利用額 ÷ 経過日数 × 締めまでの日数（締めてから4日目までは入力額のまま）。</div>
     </section>
 
 
     <section>
       <h2>引落の流れ（途中経過）</h2>
-      ${timelineHTML("スタート（0円＋入金予定）", r.openStart, r.openTimeline)}
+      ${timelineHTML("資金合計（仮）", r.openStart, r.openTimeline)}
     </section>
 
-    <section>
-      <h2>次回の引落までの入金予定</h2>
-      <div class="row">
-        <div class="name"><div class="n">入金予定</div><div class="meta">例：来月の入金など</div></div>
-        <input class="money" inputmode="numeric" data-next="1" value="${fmtInput(state.nextIncome)}" placeholder="0">
-      </div>
-    </section>
+    ${fundsHTML("open")}
 
     <section>
       <h2>今の利用額（アプリの明細を見て入力）</h2>
@@ -602,7 +630,7 @@ function render(){
         <button class="btn ghost small" id="add-card">＋ カードを追加</button>
 
         <div class="gap"></div><div class="gap"></div>
-        <h2>残高・入金の項目</h2>
+        <h2>残高の項目（口座・現金など）</h2>
         ${state.funds.map((f,i)=>`
           <div class="edit-row fund">
             <input type="text" value="${esc(f.name)}" data-fname="${i}">
@@ -631,6 +659,21 @@ function bind(){
   app.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{
     VIEW = b.dataset.view; lsSet(LS_VIEW, VIEW); render(); window.scrollTo(0,0);
   });
+  app.querySelectorAll("[data-iadd]").forEach(b=>b.onclick=()=>{
+    incList(b.dataset.iadd).push({ id:"i"+Date.now(), name:"", amount:0 });
+    scheduleSave(); render();
+    const rows = app.querySelectorAll(`[data-iname][data-list="${b.dataset.iadd}"]`);
+    if (rows.length) rows[rows.length-1].focus();
+  });
+  app.querySelectorAll("[data-idel]").forEach(b=>b.onclick=()=>{
+    const list = incList(b.dataset.list), x = list[+b.dataset.idel];
+    if (!x.amount && !x.name || confirm(`「${x.name || "入金予定"}」を削除しますか？`)){
+      list.splice(+b.dataset.idel,1); scheduleSave(); render();
+    }
+  });
+  app.querySelectorAll("[data-iname]").forEach(el=>el.addEventListener("change", ()=>{
+    incList(el.dataset.list)[+el.dataset.iname].name = el.value.trim(); scheduleSave();
+  }));
   const sd = document.getElementById("sim-date");
   if (sd) sd.addEventListener("change", ()=>{ SIM_DATE = parseDateInput(sd.value); render(); });
   const sa = document.getElementById("sim-amt");
@@ -652,7 +695,8 @@ function bind(){
         const c = state.cards[+el.dataset.open];
         c.open = { amt:v, end:keyOf(openCycle(today, c.closing).end), carried:false };
       }
-      if (el.dataset.next !== undefined) state.nextIncome = v;
+      if (el.dataset.ofund !== undefined) state.funds[+el.dataset.ofund].openAmount = v;
+      if (el.dataset.inc !== undefined) incList(el.dataset.list)[+el.dataset.inc].amount = v;
       scheduleSave(); render();
     };
     el.addEventListener("change", commit);
@@ -678,7 +722,7 @@ function bind(){
     rollOver(new Date()); scheduleSave(); render();
   };
   document.getElementById("add-fund").onclick = ()=>{
-    state.funds.push({ id:"f"+Date.now(), name:"新しい項目", amount:0 }); scheduleSave(); render();
+    state.funds.push({ id:"f"+Date.now(), name:"新しい項目", amount:0, openAmount:0 }); scheduleSave(); render();
   };
   document.getElementById("reset-cards").onclick = ()=>{
     if (confirm("カードの確定分・利用中の金額をすべて0に戻しますか？（残高はそのまま）")){
