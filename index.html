@@ -137,10 +137,9 @@ const LS_VIEW = "cf_view";
 
 /* ---------- 初期データ ---------- */
 // closing: 締め日（0 = 末日） / withdraw: 引落日（締めた月の翌月の何日）
-// marketOnly: 楽天市場での買い物専用の行（「今日使うなら」の候補から外す）
+// marketClosing: 楽天市場での買い物だけの締め日（「いつ払い？」と一覧の注記にだけ使う）
 const DEFAULT_CARDS = [
-  { id:"rakuten-ichiba", name:"楽天カード（楽天市場分）", closing:25, withdraw:27, marketOnly:true },
-  { id:"rakuten",        name:"楽天カード（市場以外）",   closing:0,  withdraw:27 },
+  { id:"rakuten",        name:"楽天カード",   closing:0,  withdraw:27, marketClosing:25 },
   { id:"saison",         name:"セディナ",     closing:0,  withdraw:27 },
   { id:"ones",           name:"ワンズ",       closing:0,  withdraw:26 },
   { id:"paypay",         name:"PayPayカード", closing:0,  withdraw:27 },
@@ -303,7 +302,6 @@ function migrate(s){
       const n = { ...c, conf:emptyAmt(), open:emptyAmt() };
       if (c.confirmed) n.conf.amt = c.amount||0; else n.open.amt = c.amount||0;
       if (c.id === "ones" && c.withdraw === 27) n.withdraw = 26;
-      if (c.id === "rakuten-ichiba") n.marketOnly = true;
       delete n.amount; delete n.confirmed;
       return n;
     });
@@ -327,6 +325,22 @@ function migrate(s){
     if (+f.openAmount) s.openIncomes.push({ id:"o"+Date.now(), name:"入金予定", amount:+f.openAmount });
     s.funds.splice(incIdx, 1);
   }
+  // 楽天：「楽天市場分」と「市場以外」の2行 → 1行にまとめる（金額は合算）
+  const ich = s.cards.findIndex(c=>c.id==="rakuten-ichiba");
+  const rk = s.cards.find(c=>c.id==="rakuten");
+  if (ich >= 0){
+    const a = s.cards[ich];
+    if (rk){
+      rk.conf.amt = (+rk.conf.amt||0) + (+a.conf.amt||0);
+      rk.open.amt = (+rk.open.amt||0) + (+a.open.amt||0);
+    }
+    s.cards.splice(ich, 1);
+  }
+  if (rk){
+    if (rk.name === "楽天カード（市場以外）") rk.name = "楽天カード";
+    if (rk.marketClosing === undefined) rk.marketClosing = 25;
+  }
+  s.cards.forEach(c=>{ delete c.marketOnly; });
   return s;
 }
 function scheduleSave(){
@@ -571,9 +585,12 @@ function simHTML(r){
           <div class="sim-head"><div class="n">${esc(x.card.name)}</div><div class="w num">${md(x.withdraw)}引落</div></div>
           <div class="sim-sub num">${md(pd)}購入 → ${md(x.closeEnd)}締め → ${md(x.withdraw)}引落（${x.days}日後）</div>
           <div class="sim-tip num">あと${x.wait}日待って <b>${md(x.nextStart)}</b> 以降に買えば → <b>${md(x.nextWd)}引落</b>（${daysBetween(x.withdraw, x.nextWd)}日先送り）</div>
+          ${x.card.marketClosing ? (()=>{ const m = purchaseInfo({ closing:x.card.marketClosing, withdraw:x.card.withdraw }, pd);
+            return `<div class="sim-sub num" style="margin-top:6px"><b>楽天市場で買う場合（${x.card.marketClosing}日締め）</b>：${md(m.closeEnd)}締め → ${md(m.withdraw)}引落（${m.days}日後）</div>
+            <div class="sim-tip num">あと${m.wait}日待って <b>${md(m.nextStart)}</b> 以降に買えば → <b>${md(m.nextWd)}引落</b>（${daysBetween(m.withdraw, m.nextWd)}日先送り）</div>`; })() : ""}
           ${out}
         </div>`;}).join("")}
-      <div class="hint">締め日の翌日に買うと、引落はまるまる1か月先になります。楽天市場での買い物は「楽天カード（楽天市場分）」の行（25日締め）を見てください。</div>
+      <div class="hint">締め日の翌日に買うと、引落はまるまる1か月先になります。楽天カードは、楽天市場で買う場合の締め日（25日）も併せて表示しています。</div>
     </section>`;
 }
 
@@ -602,9 +619,9 @@ function render(){
       <h2>締め日・引落日一覧</h2>
       <table class="info">
         <tr><th>カード</th><th>締め日</th><th>引落日</th></tr>
-        ${state.cards.map(c=>`<tr><td>${esc(c.name)}</td><td>${closingLabel(c.closing)}</td><td>翌月${c.withdraw}日</td></tr>`).join("")}
+        ${state.cards.map(c=>`<tr><td>${esc(c.name)}</td><td>${closingLabel(c.closing)}${c.marketClosing?`<br><span class="sim-sub">楽天市場は${c.marketClosing}日</span>`:""}</td><td>翌月${c.withdraw}日</td></tr>`).join("")}
       </table>
-      <div class="note">楽天カードは締め日が2つあります。楽天市場での買い物は25日締め、それ以外は末日締め（どちらも翌月27日引落）。明細を見て2行に分けて入力してください。</div>
+      <div class="note">楽天カードは、楽天市場での買い物だけ25日締め、それ以外は末日締めです（どちらも翌月27日引落）。金額は分けずに、明細の合計を1行に入力してください。</div>
     </section>
 
     <section>
