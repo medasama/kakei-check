@@ -39,6 +39,8 @@
   .pos{color:var(--accent)} .neg{color:var(--warn)}
   .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;text-align:left}
   .stat{background:var(--bg);border-radius:10px;padding:8px 10px}
+  .stat.total{grid-column:1/-1;background:var(--accent-soft)}
+  .stat.total .v{font-size:22px}
   .stat .k{font-size:11px;color:var(--sub)} .stat .v{font-size:16px;font-weight:600}
   .hint{font-size:12px;color:var(--sub);margin-top:8px}
   .tl-row{display:grid;grid-template-columns:76px 1fr auto;gap:8px;align-items:center;padding:9px 0;border-top:1px solid var(--line)}
@@ -1219,6 +1221,7 @@ function kakeiViewHTML(data){
       <div class="label">家計の支出（${ymLabel(KYM)}・${Math.round(el*100)}%経過）</div>
       <div class="big num">${yen(k.house)}</div>
       <div class="stats">
+        <div class="stat total"><div class="k">家計＋個人の合計</div><div class="v num">${yen(k.house + k.self)}</div></div>
         <div class="stat"><div class="k">個人の支出</div><div class="v num">${yen(k.self)}</div></div>
         <div class="stat"><div class="k">家計の収支（入金−家計支出）</div><div class="v num ${k.balance<0?"neg":""}">${yen(k.balance)}</div></div>
         <div class="stat"><div class="k">家計の目標合計</div><div class="v num">${yen(cats("house").reduce((a,c)=>a+(+c.budget||0),0))}</div></div>
