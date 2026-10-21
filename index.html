@@ -184,8 +184,8 @@
    設定：Supabase（medasama-tools）の接続情報を入れてください。
    空のままだと「この端末だけに保存」で動きます。
    ========================================================= */
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://edfrjxjdzxutcjeayfac.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_GVtanlT_gDwSEQSsZPC_NQ_nEK-60x2";
 const TABLE = "cashflow_store";
 
 const LS_PASS = "cf_pass";
@@ -1093,10 +1093,7 @@ function computeKakei(data){
   const house = sumG("house"), self = sumG("self");
   const income = (data.incomes||[]).reduce((a,x)=>a+(+x.amount||0),0);
   const counted = t => catById(t.cat) && catById(t.cat).group !== "skip";
-  // 二重計上の可能性：楽天カード側の楽天市場の行と、前後3日の楽天市場側の行が両方とも数えられている
-  const dups = txs.filter(t=>t.cm && counted(t) && !data.ok[t.key]).map(card=>({
-    card, markets: txs.filter(t=>t.mk && !t.coupon && counted(t) && Math.abs((new Date(t.d) - new Date(card.d))/DAY) <= 3)
-  })).filter(g=>g.markets.length);
+  const dups = findDups(txs, counted, data);
   // 対応表にないマネーフォワードの項目
   const um = {};
   txs.filter(t=>t.kind==="mf" && t.how==="default" && !t.coupon && t.raw.l && t.raw.l !== "未分類").forEach(t=>{
@@ -1104,6 +1101,38 @@ function computeKakei(data){
   });
   const unassigned = txs.filter(t=>t.how==="default").length;
   return { txs, byCat, house, self, income, balance: income - house, dups, unmapped: Object.values(um), unassigned, marketRows };
+}
+// 二重計上の可能性：楽天カード側の楽天市場の行と、楽天市場側の「同じ日・同じ店の注文」の両方が数えられていて、
+// 前後3日以内かつ（金額が一致 または 店名が一致）するもの。1つの注文は1つの組にだけ入れる。
+const mShopOf = t => nk(t).split(/\s/)[0].replace(/楽天市場店?/g, "");
+const cardShopOf = t => (nk(t).replace(/ラクテンイチバ\d*/g, "").replace(/楽天市場店?/g, "").split(/\s/).filter(Boolean)[0] || "");
+function findDups(txs, counted, data){
+  const orders = {};
+  txs.filter(t=>t.mk && counted(t)).forEach(t=>{
+    const k = t.d + "|" + mShopOf(t.t);
+    const o = orders[k] = orders[k] || { d:t.d, shop:mShopOf(t.t), txs:[], net:0 };
+    o.txs.push(t); o.net += t.spend;
+  });
+  const O = Object.values(orders).filter(o=>o.txs.some(t=>!t.coupon));
+  const cands = [];
+  txs.filter(t=>t.cm && counted(t) && !data.ok[t.key]).forEach(card=>{
+    const cs = cardShopOf(card.t);
+    O.forEach(o=>{
+      const gap = Math.abs((new Date(o.d) - new Date(card.d))/DAY);
+      if (gap > 3) return;
+      const amt = o.net === card.spend;
+      const name = !!(cs && o.shop && (o.shop.includes(cs) || cs.includes(o.shop)));
+      if (amt || name) cands.push({ card, order:o, score:(amt?2:0)+(name?1:0), gap });
+    });
+  });
+  cands.sort((a,b)=> b.score - a.score || a.gap - b.gap);
+  const usedCard = new Set(), usedOrder = new Set(), groups = [];
+  cands.forEach(c=>{
+    if (usedCard.has(c.card.key) || usedOrder.has(c.order)) return;
+    usedCard.add(c.card.key); usedOrder.add(c.order);
+    groups.push({ card:c.card, order:c.order, amtMatch: c.score >= 2 });
+  });
+  return groups.sort((a,b)=> b.card.d.localeCompare(a.card.d));
 }
 function marketHints(t, k){
   if (!t.cm) return [];
@@ -1208,14 +1237,16 @@ function kakeiViewHTML(data){
             <select data-mapadd="${esc(u.l)}|${esc(u.m)}"><option value="">振り分け先を選ぶ</option>${catOptions("",false)}</select></div>`).join("")}
         </div>` : ""}
       ${k.dups.length ? `<details class="alert warn" id="d-dups" open><summary>二重計上の可能性 ${k.dups.length}組</summary>
-          <div class="hint" style="color:inherit">楽天カード側と楽天市場側の両方が数えられています。どちらかを除外してください（マネーフォワードでも同じ行を振替に）。</div>
+          <div class="hint" style="color:inherit">同じ買い物が楽天カード側と楽天市場側の両方で数えられている可能性があります。どちらかを除外してください（マネーフォワードでも同じ側を振替に）。</div>
           ${k.dups.map(g=>`<div class="dup">
-            ${[g.card, ...g.markets].map(t=>`<div class="dup-row">
-              <span class="tag">${t.cm?"カード":"市場"}</span>
-              <span class="dup-t num">${mdS(t.d)} ${esc(t.t.slice(0,30))}</span>
-              <span class="num">${yen(t.spend)}</span>
-              <button class="btn ghost small" data-dupex="${esc(t.key)}">除外</button></div>`).join("")}
-            <button class="btn ghost small" data-dupok="${esc(g.card.key)}" style="margin-top:4px">別の買い物（両方数える）</button>
+            <div class="dup-row"><span class="tag">カード</span><span class="dup-t num">${mdS(g.card.d)} ${esc(g.card.t.slice(0,30))}</span><span class="num">${yen(g.card.spend)}</span></div>
+            <div class="dup-row"><span class="tag">市場</span><span class="dup-t num">${mdS(g.order.d)} ${esc(g.order.txs.find(t=>!t.coupon).t.slice(0,30))}${g.order.txs.length>1?` ほか${g.order.txs.length-1}行`:""}</span><span class="num">${yen(g.order.net)}</span></div>
+            <div class="sim-sub">${g.amtMatch ? "金額が一致" : "店名が一致（金額は不一致）"}</div>
+            <div class="flex" style="margin-top:4px">
+              <button class="btn ghost small" data-dupex="${esc(g.card.key)}">カード側を除外</button>
+              <button class="btn ghost small" data-dupex="${esc(g.order.txs.map(t=>t.key).join(","))}">市場側を除外</button>
+              <button class="btn ghost small" data-dupok="${esc(g.card.key)}">別の買い物</button>
+            </div>
           </div>`).join("")}
         </details>` : ""}
       ${k.unassigned ? `<div class="alert amber">未振り分けが${k.unassigned}件あります（家計・その他に仮で入っています）。</div>` : ""}
@@ -1342,6 +1373,7 @@ function headerHTML(){
       <h1>家計チェック</h1>
       <span id="sync" class="sync${syncErr?" err":""}">${esc(syncMsg)}</span>
     </header>
+    ${sb ? "" : `<div class="alert warn" style="margin:0 0 10px">同期していません：Supabaseの設定（URL・キー）が空か、読み込みに失敗しています。データはこの端末のこのURLにだけ保存されます。</div>`}
     <div class="mode">
       <button data-mode="pay" class="${!isKakeiView()?"on":""}">引落</button>
       <button data-mode="kakei" class="${isKakeiView()?"on":""}">家計</button>
@@ -1429,7 +1461,7 @@ function bindKakei(){
     const [l, m] = el.dataset.mapadd.split("|");
     K.mfMap.unshift({ l, m, cat: el.value }); saveS();
   }));
-  app.querySelectorAll("[data-dupex]").forEach(b=>b.onclick=()=>{ data.ov[b.dataset.dupex] = "x_skip"; saveMonthSoon(KYM); render(); });
+  app.querySelectorAll("[data-dupex]").forEach(b=>b.onclick=()=>{ b.dataset.dupex.split(",").forEach(k=>data.ov[k] = "x_skip"); saveMonthSoon(KYM); render(); });
   app.querySelectorAll("[data-dupok]").forEach(b=>b.onclick=()=>{ data.ok = data.ok || {}; data.ok[b.dataset.dupok] = true; saveMonthSoon(KYM); render(); });
   const onK = (sel, fn) => app.querySelectorAll(sel).forEach(el=>el.addEventListener("change", ()=>{ fn(el); saveS(); }));
   onK("[data-kcname]", el=>K.cats[+el.dataset.kcname].name = el.value.trim() || "カテゴリ");
