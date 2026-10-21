@@ -149,6 +149,11 @@
   .tag.pt{background:var(--accent-soft);color:var(--accent)}
   .tag.un{background:var(--amber-soft);color:var(--amber)}
   .hintbox{font-size:11.5px;color:var(--sub);background:var(--bg);border-radius:7px;padding:5px 7px;margin-top:5px;word-break:break-all}
+  .mf-link{position:fixed;top:14px;right:18px;z-index:30;display:inline-flex;align-items:center;gap:4px;
+    background:var(--card);color:var(--accent);border:1px solid var(--accent);border-radius:999px;
+    padding:8px 14px;font-size:13px;font-weight:700;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+  .mf-link:hover{background:var(--accent);color:#fff}
+  @media (max-width:899px){ .mf-link{display:none} }
   .rulebar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:2px solid var(--accent);
     box-shadow:0 -4px 16px rgba(0,0,0,.12);padding:10px 16px calc(10px + env(safe-area-inset-bottom))}
   .rulebar .rb-t{font-size:13px;font-weight:600;max-width:560px;margin:0 auto}
@@ -809,7 +814,7 @@ const isKakeiView = () => KAKEI_VIEWS.includes(VIEW);
 
 function defaultKakei(){
   return {
-    v:2,
+    v:3,
     cats: [
       { id:"h_food",    name:"食費",         group:"house", budget:110000 },
       { id:"h_daily",   name:"日用品",       group:"house", budget:10000 },
@@ -826,6 +831,7 @@ function defaultKakei(){
       { id:"s_biz",     name:"事業経費",     group:"self" },
       { id:"s_med",     name:"医療費",       group:"self" },
       { id:"s_pension", name:"年金",         group:"self" },
+      { id:"s_appgift", name:"Appleギフト",  group:"self" },
       { id:"s_other",   name:"その他",       group:"self" },
       { id:"x_skip",    name:"対象外",       group:"skip" },
       { id:"x_invest",  name:"投資（家計外）", group:"skip" },
@@ -854,13 +860,24 @@ function defaultKakei(){
       { id:"r3", kw:"楽天モバイル",           src:"pt",  cat:"s_tel" },
       { id:"r4", kw:"ココカラファイン",       src:"all", cat:"h_daily" },
       { id:"r5", kw:"楽天市場",               src:"pt",  cat:"x_skip" },
+      { id:"r6", kw:"Apple Gift Card",        src:"all", cat:"s_appgift" },
     ],
   };
 }
 
 // 保存済みの家計設定に、後から追加した初期設定を足す
 function upgradeKakei(K){
-  if ((K.v||1) >= 2) return;
+  if ((K.v||1) < 2) upgradeKakeiV2(K);
+  if (K.v < 3){
+    if (!K.cats.some(c=>c.id==="s_appgift")){
+      const at = K.cats.findIndex(c=>c.id==="s_other");
+      K.cats.splice(at >= 0 ? at : K.cats.length, 0, { id:"s_appgift", name:"Appleギフト", group:"self" });
+    }
+    if (!K.rules.some(r=>nk(r.kw)===nk("Apple Gift Card"))) K.rules.unshift({ id:"r6", kw:"Apple Gift Card", src:"all", cat:"s_appgift" });
+    K.v = 3;
+  }
+}
+function upgradeKakeiV2(K){
   const D = defaultKakei();
   if (!K.cats.some(c=>c.id==="h_leisure")){
     const at = K.cats.findIndex(c=>c.id==="h_other");
@@ -1243,7 +1260,11 @@ function kakeiViewHTML(data){
           <div class="hint" style="color:inherit">同じ買い物が楽天カード側と楽天市場側の両方で数えられている可能性があります。どちらかを除外してください（マネーフォワードでも同じ側を振替に）。</div>
           ${k.dups.map(g=>`<div class="dup">
             <div class="dup-row"><span class="tag">カード</span><span class="dup-t num">${mdS(g.card.d)} ${esc(g.card.t.slice(0,30))}</span><span class="num">${yen(g.card.spend)}</span></div>
-            <div class="dup-row"><span class="tag">市場</span><span class="dup-t num">${mdS(g.order.d)} ${esc(g.order.txs.find(t=>!t.coupon).t.slice(0,30))}${g.order.txs.length>1?` ほか${g.order.txs.length-1}行`:""}</span><span class="num">${yen(g.order.net)}</span></div>
+            <div class="dup-row"><span class="tag">市場</span><span class="dup-t num">${mdS(g.order.d)} ${esc(g.order.txs.find(t=>!t.coupon).t.slice(0,30))}${g.order.txs.filter(t=>!t.coupon).length>1?` ほか${g.order.txs.filter(t=>!t.coupon).length-1}点`:""}</span><span class="num">${yen(g.order.net)}</span></div>
+            ${(()=>{ const cp = -g.order.txs.filter(t=>t.coupon).reduce((x,t)=>x+t.spend,0);
+              if (!cp) return "";
+              const gross = g.order.net + cp;
+              return `<div class="sim-sub num" style="text-align:right">クーポン適用後（${yen(gross)} − クーポン${yen(cp)}・${Math.round(cp/gross*100)}%引き）</div>`; })()}
             <div class="sim-sub">${g.amtMatch ? "金額が一致" : "店名が一致（金額は不一致）"}</div>
             <div class="flex" style="margin-top:4px">
               <button class="btn ghost small" data-dupex="${esc(g.card.key)}">カード側を除外</button>
@@ -1372,6 +1393,7 @@ function renderKakei(){
 }
 function headerHTML(){
   return `
+    <a class="mf-link" href="https://moneyforward.com/cf" target="_blank" rel="noopener">マネーフォワード ↗</a>
     <header class="top">
       <h1>家計チェック</h1>
       <span id="sync" class="sync${syncErr?" err":""}">${esc(syncMsg)}</span>
