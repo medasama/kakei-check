@@ -158,6 +158,11 @@
   .alert.amber{background:var(--amber-soft);color:var(--amber)}
   .alert.info{background:var(--bg);color:var(--sub)}
   .alert summary{font-weight:600}
+  .um-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid rgba(0,0,0,.08);color:var(--ink)}
+  .um-row select{font:inherit;font-size:12.5px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);max-width:55%}
+  .dup{padding:6px 0;border-top:1px solid rgba(0,0,0,.1);color:var(--ink)}
+  .dup-row{display:grid;grid-template-columns:auto 1fr auto auto;gap:6px;align-items:center;font-size:12.5px;padding:3px 0}
+  .dup-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .leak{font-size:12px;padding:3px 0;border-top:1px solid rgba(0,0,0,.06);word-break:break-all}
   .filebtn{display:inline-block;cursor:pointer}
   textarea.paste{width:100%;min-height:110px;font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px}
@@ -395,6 +400,7 @@ function migrate(s){
   }
   s.cards.forEach(c=>{ delete c.marketOnly; });
   if (!s.kakei || !Array.isArray(s.kakei.cats)) s.kakei = defaultKakei();
+  upgradeKakei(s.kakei);
   return s;
 }
 function scheduleSave(){
@@ -801,13 +807,13 @@ const isKakeiView = () => KAKEI_VIEWS.includes(VIEW);
 
 function defaultKakei(){
   return {
-    v:1,
-    mfPolicy: "market",   // MFで振替にしている側：market＝楽天市場(my Rakuten)側 / card＝楽天カード側
+    v:2,
     cats: [
       { id:"h_food",    name:"食費",         group:"house", budget:110000 },
       { id:"h_daily",   name:"日用品",       group:"house", budget:10000 },
       { id:"h_alcohol", name:"お酒",         group:"house", budget:20000 },
       { id:"h_net",     name:"インターネット", group:"house", budget:4180 },
+      { id:"h_leisure", name:"レジャー",     group:"house", budget:0 },
       { id:"h_other",   name:"その他",       group:"house", budget:20000 },
       { id:"s_beauty",  name:"衣服美容",     group:"self" },
       { id:"s_sport",   name:"運動",         group:"self" },
@@ -824,12 +830,14 @@ function defaultKakei(){
     ],
     // MFの大項目／中項目 → カテゴリ（空欄はどれでも）
     mfMap: [
+      { l:"",             m:"お酒",      cat:"h_alcohol" },
       { l:"食費",         m:"",          cat:"h_food" },
       { l:"日用品",       m:"",          cat:"h_daily" },
       { l:"通信費",       m:"インターネット", cat:"h_net" },
       { l:"通信費",       m:"",          cat:"s_tel" },
       { l:"衣服・美容",   m:"",          cat:"s_beauty" },
       { l:"趣味・娯楽",   m:"スポーツ",  cat:"s_sport" },
+      { l:"趣味・娯楽",   m:"",          cat:"h_leisure" },
       { l:"教養・教育",   m:"",          cat:"s_book" },
       { l:"交通費",       m:"",          cat:"s_trans" },
       { l:"",             m:"サブスク",  cat:"s_sub" },
@@ -843,10 +851,26 @@ function defaultKakei(){
       { id:"r2", kw:"投信積立",               src:"pt",  cat:"x_invest" },
       { id:"r3", kw:"楽天モバイル",           src:"pt",  cat:"s_tel" },
       { id:"r4", kw:"ココカラファイン",       src:"all", cat:"h_daily" },
+      { id:"r5", kw:"楽天市場",               src:"pt",  cat:"x_skip" },
     ],
   };
 }
 
+// 保存済みの家計設定に、後から追加した初期設定を足す
+function upgradeKakei(K){
+  if ((K.v||1) >= 2) return;
+  const D = defaultKakei();
+  if (!K.cats.some(c=>c.id==="h_leisure")){
+    const at = K.cats.findIndex(c=>c.id==="h_other");
+    K.cats.splice(at >= 0 ? at : K.cats.length, 0, D.cats.find(c=>c.id==="h_leisure"));
+  }
+  const hasMap = (l,m) => K.mfMap.some(x=>x.l===l && x.m===m);
+  if (!hasMap("","お酒")) K.mfMap.unshift({ l:"", m:"お酒", cat:"h_alcohol" });
+  if (!hasMap("趣味・娯楽","")) K.mfMap.push({ l:"趣味・娯楽", m:"", cat:"h_leisure" });
+  if (!K.rules.some(r=>r.src==="pt" && r.kw==="楽天市場")) K.rules.push({ id:"r5", kw:"楽天市場", src:"pt", cat:"x_skip" });
+  delete K.mfPolicy;
+  K.v = 2;
+}
 const nk = s => String(s||"").normalize("NFKC").toLowerCase();
 const ymOf = d => d.slice(0,7);                       // "2026-09-30" → "2026-09"
 const ymLabel = ym => `${+ym.slice(0,4)}年${+ym.slice(5,7)}月`;
@@ -1033,16 +1057,28 @@ function classify(kind, r, text, ov){
   return { cat: fallback, how: "default" };
 }
 function computeKakei(data){
-  const txs = [], marketRows = [], cardMarket = [];
+  data.ok = data.ok || {};
+  const txs = [], marketRows = [], coupons = [];
+  const shopOf = t => nk(t).split(/\s/)[0];
   data.mf.forEach(r=>{
     const key = "m:" + r.id;
-    if (isMarketSrc(r)){ marketRows.push(r); return; }
-    const cm = isCardMarket(r);
-    if (cm) cardMarket.push(r);
-    if (!cm && (r.calc === 0 || r.tr === 1)) return;
-    if (r.amt > 0 && (r.l === "収入" || r.l === "未分類" || !r.l)) return;   // 収入・ポイント付与などは集計しない
+    const mk = isMarketSrc(r), cm = isCardMarket(r);
+    if (mk) marketRows.push(r);
+    if (r.calc === 0 || r.tr === 1) return;                      // マネーフォワードの設定どおり
+    if (r.amt > 0){
+      if (mk){ coupons.push(r); return; }                          // 楽天市場のクーポン値引き → 後で同じ店の商品から差し引く
+      if (r.l === "収入" || r.l === "未分類" || !r.l) return;      // 収入・ポイント付与などは集計しない
+    }
     const c = classify("mf", r, r.t, data.ov[key]);
-    txs.push({ key, kind:"mf", d:r.d, t:r.t, spend:-r.amt, cm, raw:r, ...c });
+    txs.push({ key, kind:"mf", d:r.d, t:r.t, spend:-r.amt, cm, mk, raw:r, ...c });
+  });
+  // クーポン：同じ店（内容の先頭の語）・前後2日の商品と同じカテゴリから差し引く
+  coupons.forEach(r=>{
+    const key = "m:" + r.id, shop = shopOf(r.t);
+    const base = txs.find(t=>t.mk && t.spend > 0 && shopOf(t.t) === shop && Math.abs((new Date(t.d) - new Date(r.d))/DAY) <= 2);
+    if (!base && !data.ov[key]) return;
+    const c = data.ov[key] && catById(data.ov[key]) ? { cat:data.ov[key], how:"manual" } : { cat:base.cat, how:base.how==="default"?"default":"rule" };
+    txs.push({ key, kind:"mf", d:r.d, t:r.t, spend:-r.amt, cm:false, mk:true, coupon:true, raw:r, ...c });
   });
   data.pts.forEach(p=>{
     const key = "p:" + p.key;
@@ -1056,16 +1092,18 @@ function computeKakei(data){
   const sumG = g => state.kakei.cats.filter(c=>c.group===g).reduce((a,c)=>a+byCat[c.id].total,0);
   const house = sumG("house"), self = sumG("self");
   const income = (data.incomes||[]).reduce((a,x)=>a+(+x.amount||0),0);
-  // MF側の振替漏れ（運用設定で見る側が変わる）
-  const leaks = (state.kakei.mfPolicy === "card")
-    ? cardMarket.filter(r=>r.calc===1 && r.tr===0)
-    : marketRows.filter(r=>r.calc===1 && r.tr===0);
-  // カード明細待ち（参考）：最後のカード側楽天市場明細より後の楽天市場の注文
-  const lastCard = cardMarket.reduce((a,r)=>r.d>a?r.d:a, "");
-  const pending = marketRows.filter(r=>r.amt<0 && r.d > lastCard);
+  const counted = t => catById(t.cat) && catById(t.cat).group !== "skip";
+  // 二重計上の可能性：楽天カード側の楽天市場の行と、前後3日の楽天市場側の行が両方とも数えられている
+  const dups = txs.filter(t=>t.cm && counted(t) && !data.ok[t.key]).map(card=>({
+    card, markets: txs.filter(t=>t.mk && !t.coupon && counted(t) && Math.abs((new Date(t.d) - new Date(card.d))/DAY) <= 3)
+  })).filter(g=>g.markets.length);
+  // 対応表にないマネーフォワードの項目
+  const um = {};
+  txs.filter(t=>t.kind==="mf" && t.how==="default" && !t.coupon && t.raw.l && t.raw.l !== "未分類").forEach(t=>{
+    const k = t.raw.l + "|" + t.raw.m; um[k] = um[k] || { l:t.raw.l, m:t.raw.m, n:0, sum:0 }; um[k].n++; um[k].sum += t.spend;
+  });
   const unassigned = txs.filter(t=>t.how==="default").length;
-  return { txs, byCat, house, self, income, balance: income - house, leaks, pending,
-           pendingSum: pending.reduce((a,r)=>a-r.amt,0), unassigned, marketRows, lastCard };
+  return { txs, byCat, house, self, income, balance: income - house, dups, unmapped: Object.values(um), unassigned, marketRows };
 }
 function marketHints(t, k){
   if (!t.cm) return [];
@@ -1088,6 +1126,7 @@ function txHTML(t, k, data){
   const tags = [
     t.kind==="pt" ? `<span class="tag pt">ポイント</span>` : `<span class="tag">MF</span>`,
     t.cm ? `<span class="tag">カード・楽天市場</span>` : "",
+    t.mk ? `<span class="tag">楽天市場${t.coupon?"・クーポン":""}</span>` : "",
     t.how==="default" ? `<span class="tag un">未振り分け</span>` : "",
     t.how==="manual" ? `<span class="tag">手動</span>` : "",
   ].join("");
@@ -1163,11 +1202,22 @@ function kakeiViewHTML(data){
       <label class="btn ghost small filebtn">CSVファイルを選ぶ<input type="file" id="mf-file" accept=".csv,text/csv" hidden></label>
       <div class="hint">マネーフォワードWebの「家計簿」→「入出金」→ ダウンロード（CSV）。月の途中でも何度でも取り込み直せます。手動で振り分けた分は残ります。</div>
       ${K_MSG ? `<div class="alert ${K_MSG_ERR?"warn":"info"}">${esc(K_MSG)}</div>` : ""}
-      ${k.leaks.length ? `<details class="alert warn" id="d-leaks"><summary>マネーフォワードで振替漏れ ${k.leaks.length}件</summary>
-          <div class="hint" style="color:inherit">${state.kakei.mfPolicy==="card"?"楽天カード側の楽天市場分":"楽天市場（my Rakuten）側"}の行が計算対象のままです。マネーフォワードで振替にしてください（このツールの集計には影響しません）。</div>
-          ${k.leaks.map(r=>`<div class="leak num">${mdS(r.d)}　${esc(r.t.slice(0,36))}　${yen(r.amt)}</div>`).join("")}
+      ${k.unmapped.length ? `<div class="alert amber" id="unmapped">
+          <b>対応表にないマネーフォワードの項目</b>（選ぶと、その項目の明細がまとめて振り分けられます）
+          ${k.unmapped.map(u=>`<div class="um-row"><span>${esc(u.l)}${u.m?" / "+esc(u.m):""}<br><span class="sim-sub num">${u.n}件・${yen(u.sum)}</span></span>
+            <select data-mapadd="${esc(u.l)}|${esc(u.m)}"><option value="">振り分け先を選ぶ</option>${catOptions("",false)}</select></div>`).join("")}
+        </div>` : ""}
+      ${k.dups.length ? `<details class="alert warn" id="d-dups" open><summary>二重計上の可能性 ${k.dups.length}組</summary>
+          <div class="hint" style="color:inherit">楽天カード側と楽天市場側の両方が数えられています。どちらかを除外してください（マネーフォワードでも同じ行を振替に）。</div>
+          ${k.dups.map(g=>`<div class="dup">
+            ${[g.card, ...g.markets].map(t=>`<div class="dup-row">
+              <span class="tag">${t.cm?"カード":"市場"}</span>
+              <span class="dup-t num">${mdS(t.d)} ${esc(t.t.slice(0,30))}</span>
+              <span class="num">${yen(t.spend)}</span>
+              <button class="btn ghost small" data-dupex="${esc(t.key)}">除外</button></div>`).join("")}
+            <button class="btn ghost small" data-dupok="${esc(g.card.key)}" style="margin-top:4px">別の買い物（両方数える）</button>
+          </div>`).join("")}
         </details>` : ""}
-      ${k.pending.length ? `<div class="alert amber">カード明細待ちの楽天市場の注文：${k.pending.length}件・${yen(k.pendingSum)}（参考・集計には未反映）</div>` : ""}
       ${k.unassigned ? `<div class="alert amber">未振り分けが${k.unassigned}件あります（家計・その他に仮で入っています）。</div>` : ""}
     </section>
 
@@ -1195,7 +1245,7 @@ function kakeiViewHTML(data){
     <section>
       <h2>集計しないもの</h2>
       ${cats("skip").map(c=>catBlockHTML(c,k,false,el)).join("")}
-      <div class="hint">楽天市場（my Rakuten）の明細は、楽天カード側と二重になるため常に集計しません（カードの実際の請求額を使います）。</div>
+      <div class="hint">マネーフォワードで計算対象外・振替の行は集計しません。「二重計上の可能性」で除外した行はここに入ります。</div>
     </section>
     ${kakeiSettingsHTML()}`;
 }
@@ -1226,11 +1276,6 @@ function kakeiSettingsHTML(){
       <details id="d-ksettings">
         <summary>家計の設定</summary>
         <div class="gap"></div>
-        <h2>マネーフォワードで振替にしている側</h2>
-        <label class="radio"><input type="radio" name="mfpol" value="market"${K.mfPolicy!=="card"?" checked":""}> 楽天市場（my Rakuten）側を振替</label>
-        <label class="radio"><input type="radio" name="mfpol" value="card"${K.mfPolicy==="card"?" checked":""}> 楽天カード側を振替</label>
-        <div class="hint">「振替漏れ」の一覧に出す行が変わるだけで、このツールの集計は変わりません。</div>
-
         <div class="gap"></div><h2>カテゴリと目標（家計のみ）</h2>
         ${K.cats.map((c,i)=>`
           <div class="kset cat3">
@@ -1379,7 +1424,13 @@ function bindKakei(){
   });
 
   // 設定
-  app.querySelectorAll('input[name="mfpol"]').forEach(r=>r.onchange=()=>{ K.mfPolicy = r.value; saveS(); });
+  app.querySelectorAll("[data-mapadd]").forEach(el=>el.addEventListener("change", ()=>{
+    if (!el.value) return;
+    const [l, m] = el.dataset.mapadd.split("|");
+    K.mfMap.unshift({ l, m, cat: el.value }); saveS();
+  }));
+  app.querySelectorAll("[data-dupex]").forEach(b=>b.onclick=()=>{ data.ov[b.dataset.dupex] = "x_skip"; saveMonthSoon(KYM); render(); });
+  app.querySelectorAll("[data-dupok]").forEach(b=>b.onclick=()=>{ data.ok = data.ok || {}; data.ok[b.dataset.dupok] = true; saveMonthSoon(KYM); render(); });
   const onK = (sel, fn) => app.querySelectorAll(sel).forEach(el=>el.addEventListener("change", ()=>{ fn(el); saveS(); }));
   onK("[data-kcname]", el=>K.cats[+el.dataset.kcname].name = el.value.trim() || "カテゴリ");
   onK("[data-kcbud]",  el=>K.cats[+el.dataset.kcbud].budget = parseYen(el.value));
