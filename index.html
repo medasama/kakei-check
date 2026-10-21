@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f2a37">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="引落チェック">
-<title>引落チェック</title>
+<meta name="apple-mobile-web-app-title" content="家計チェック">
+<title>家計チェック</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root{
@@ -116,6 +116,58 @@
   .inc-head{font-size:12px;color:var(--sub);font-weight:600;margin:12px 0 2px}
   .inc-row{display:grid;grid-template-columns:1fr 120px 28px;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
   .inc-row input.memo{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;width:100%;min-width:0}
+  .mode{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+  .mode button{border:1px solid var(--line);background:var(--card);color:var(--sub);border-radius:10px;padding:8px;font-weight:700;font-size:14px}
+  .mode button.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
+  .tabs.two{grid-template-columns:1fr 1fr}
+  .monthnav{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px}
+  .monthnav button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:9px;padding:6px 14px}
+  .monthnav .ym{font-weight:700;font-size:16px}
+  details.cat{border-top:1px solid var(--line)}
+  details.cat:first-of-type{border-top:none}
+  details.cat > summary{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:2px 8px;padding:10px 0;font-weight:400}
+  details.cat > summary::after{content:none}
+  details.cat.zero > summary{opacity:.45}
+  details.cat .cn{font-weight:600;font-size:14.5px}
+  details.cat .ca{font-size:20px;font-weight:700;text-align:right}
+  details.cat .cs{grid-column:1/-1;font-size:12px;color:var(--sub)}
+  .bar{grid-column:1/-1;height:6px;background:var(--line);border-radius:3px;position:relative;margin-top:4px}
+  .bar i{display:block;height:100%;border-radius:3px;background:var(--accent)}
+  .bar i.warn{background:var(--amber)} .bar i.over{background:var(--warn)}
+  .bar b{position:absolute;top:-3px;width:2px;height:12px;background:var(--ink);opacity:.45}
+  .txlist{padding:0 0 8px}
+  .tx{padding:8px 0;border-top:1px dashed var(--line);font-size:13px}
+  .tx-top{display:grid;grid-template-columns:38px 1fr auto;gap:6px;align-items:start}
+  .tx-t{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-all}
+  .tx-a{font-weight:600}
+  .tx-sub{display:flex;gap:5px;align-items:center;margin-top:5px;flex-wrap:wrap}
+  .tx select,.kset select{font:inherit;font-size:12.5px;padding:4px 6px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink);max-width:100%}
+  .tx select{margin-left:auto}
+  .tag{font-size:10.5px;border-radius:5px;padding:1px 5px;background:var(--line);color:var(--sub);white-space:nowrap}
+  .tag.pt{background:var(--accent-soft);color:var(--accent)}
+  .tag.un{background:var(--amber-soft);color:var(--amber)}
+  .hintbox{font-size:11.5px;color:var(--sub);background:var(--bg);border-radius:7px;padding:5px 7px;margin-top:5px;word-break:break-all}
+  .rulebar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:2px solid var(--accent);
+    box-shadow:0 -4px 16px rgba(0,0,0,.12);padding:10px 16px calc(10px + env(safe-area-inset-bottom))}
+  .rulebar .rb-t{font-size:13px;font-weight:600;max-width:560px;margin:0 auto}
+  .rulebar .ruledraft{max-width:560px;margin:6px auto 0}
+  .ruledraft{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;align-items:center}
+  .ruledraft input{font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:150px}
+  .alert{display:block;border-radius:10px;padding:9px 10px;margin-top:8px;font-size:13px}
+  .alert.warn{background:var(--warn-soft);color:var(--warn)}
+  .alert.amber{background:var(--amber-soft);color:var(--amber)}
+  .alert.info{background:var(--bg);color:var(--sub)}
+  .alert summary{font-weight:600}
+  .leak{font-size:12px;padding:3px 0;border-top:1px solid rgba(0,0,0,.06);word-break:break-all}
+  .filebtn{display:inline-block;cursor:pointer}
+  textarea.paste{width:100%;min-height:110px;font:inherit;font-size:13px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px}
+  .kset{display:grid;gap:6px;align-items:center;margin:6px 0}
+  .kset input{font:inherit;font-size:13px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%;min-width:0}
+  .kset.cat3{grid-template-columns:1fr 34px 96px 28px}
+  .kset.rule4{grid-template-columns:1fr 74px 1fr 28px}
+  .kset.map4{grid-template-columns:1fr 1fr 1fr 28px}
+  .kset input.money.sm{width:100%;padding:6px}
+  .radio{display:flex;gap:8px;align-items:center;font-size:14px;margin:6px 0}
   .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
 </style>
 </head>
@@ -127,8 +179,8 @@
    設定：Supabase（medasama-tools）の接続情報を入れてください。
    空のままだと「この端末だけに保存」で動きます。
    ========================================================= */
-const SUPABASE_URL = "https://edfrjxjdzxutcjeayfac.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_GVtanlT_gDwSEQSsZPC_NQ_nEK-60x2";
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
 const TABLE = "cashflow_store";
 
 const LS_PASS = "cf_pass";
@@ -161,6 +213,7 @@ function freshState(){
     v:2,
     cards: DEFAULT_CARDS.map(c=>({ ...c, conf:emptyAmt(), open:emptyAmt() })),
     funds: DEFAULT_FUNDS.map(f=>({ ...f, amount:0, openAmount:0 })),
+    kakei: defaultKakei(),
     incomes: [],       // 確定分タブの入金予定（複数）
     openIncomes: [],   // 途中経過タブの入金予定（仮・複数）
     updatedAt: null,
@@ -341,6 +394,7 @@ function migrate(s){
     if (rk.marketClosing === undefined) rk.marketClosing = 25;
   }
   s.cards.forEach(c=>{ delete c.marketOnly; });
+  if (!s.kakei || !Array.isArray(s.kakei.cats)) s.kakei = defaultKakei();
   return s;
 }
 function scheduleSave(){
@@ -414,7 +468,7 @@ function renderLock(errMsg=""){
   document.getElementById("app").innerHTML = `
   <div class="lock">
     <section>
-      <h2>引落チェック</h2>
+      <h2>家計チェック</h2>
       <p style="margin:0 0 12px;font-size:14px">合言葉を入力してください。初めての場合は、ここで決めた合言葉でデータが作られます。</p>
       <input type="password" id="pass" autocomplete="current-password" placeholder="合言葉">
       <label><input type="checkbox" id="remember" checked> この端末に合言葉を記憶する</label>
@@ -595,6 +649,7 @@ function simHTML(r){
 }
 
 function render(){
+  if (isKakeiView()) return renderKakei();
   const r = compute();
   const app = document.getElementById("app");
   const openDetails = [...document.querySelectorAll("details[open]")].map(d=>d.id);
@@ -602,10 +657,7 @@ function render(){
 
   app.innerHTML = `
   <div class="wrap">
-    <header class="top">
-      <h1>引落チェック</h1>
-      <span id="sync" class="sync${syncErr?" err":""}">${esc(syncMsg)}</span>
-    </header>
+    ${headerHTML()}
 
     <div class="tabs">
       <button data-view="conf" class="${VIEW==="conf"?"on":""}">確定分<small>今月の引落</small></button>
@@ -666,9 +718,7 @@ function render(){
 function bind(){
   const app = document.getElementById("app");
   const today = new Date();
-  app.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{
-    VIEW = b.dataset.view; lsSet(LS_VIEW, VIEW); render(); window.scrollTo(0,0);
-  });
+  bindCommon();
   app.querySelectorAll("[data-iadd]").forEach(b=>b.onclick=()=>{
     incList(b.dataset.iadd).push({ id:"i"+Date.now(), name:"", amount:0 });
     scheduleSave(); render();
@@ -740,11 +790,625 @@ function bind(){
       scheduleSave(); render();
     }
   };
-  document.getElementById("lock").onclick = ()=>{ lsDel(LS_PASS); PASS=null; state=null; renderLock(); };
+  document.getElementById("lock").onclick = ()=>{ lsDel(LS_PASS); PASS=null; state=null; for (const k in MONTHS) delete MONTHS[k]; renderLock(); };
+}
+
+/* =========================================================
+   家計（マネーフォワードCSV＋楽天ポイント）
+   ========================================================= */
+const KAKEI_VIEWS = ["kakei","points"];
+const isKakeiView = () => KAKEI_VIEWS.includes(VIEW);
+
+function defaultKakei(){
+  return {
+    v:1,
+    mfPolicy: "market",   // MFで振替にしている側：market＝楽天市場(my Rakuten)側 / card＝楽天カード側
+    cats: [
+      { id:"h_food",    name:"食費",         group:"house", budget:110000 },
+      { id:"h_daily",   name:"日用品",       group:"house", budget:10000 },
+      { id:"h_alcohol", name:"お酒",         group:"house", budget:20000 },
+      { id:"h_net",     name:"インターネット", group:"house", budget:4180 },
+      { id:"h_other",   name:"その他",       group:"house", budget:20000 },
+      { id:"s_beauty",  name:"衣服美容",     group:"self" },
+      { id:"s_sport",   name:"運動",         group:"self" },
+      { id:"s_book",    name:"本・習い事",   group:"self" },
+      { id:"s_tel",     name:"通信費",       group:"self" },
+      { id:"s_trans",   name:"交通",         group:"self" },
+      { id:"s_sub",     name:"サブスク",     group:"self" },
+      { id:"s_biz",     name:"事業経費",     group:"self" },
+      { id:"s_med",     name:"医療費",       group:"self" },
+      { id:"s_pension", name:"年金",         group:"self" },
+      { id:"s_other",   name:"その他",       group:"self" },
+      { id:"x_skip",    name:"対象外",       group:"skip" },
+      { id:"x_invest",  name:"投資（家計外）", group:"skip" },
+    ],
+    // MFの大項目／中項目 → カテゴリ（空欄はどれでも）
+    mfMap: [
+      { l:"食費",         m:"",          cat:"h_food" },
+      { l:"日用品",       m:"",          cat:"h_daily" },
+      { l:"通信費",       m:"インターネット", cat:"h_net" },
+      { l:"通信費",       m:"",          cat:"s_tel" },
+      { l:"衣服・美容",   m:"",          cat:"s_beauty" },
+      { l:"趣味・娯楽",   m:"スポーツ",  cat:"s_sport" },
+      { l:"教養・教育",   m:"",          cat:"s_book" },
+      { l:"交通費",       m:"",          cat:"s_trans" },
+      { l:"",             m:"サブスク",  cat:"s_sub" },
+      { l:"",             m:"事業経費",  cat:"s_biz" },
+      { l:"健康・医療",   m:"",          cat:"s_med" },
+      { l:"税・社会保障", m:"年金保険料", cat:"s_pension" },
+    ],
+    // キーワード → カテゴリ（上にあるものが優先）。src: all / mf / pt
+    rules: [
+      { id:"r1", kw:"ポイントで支払いサービス", src:"pt",  cat:"x_skip" },
+      { id:"r2", kw:"投信積立",               src:"pt",  cat:"x_invest" },
+      { id:"r3", kw:"楽天モバイル",           src:"pt",  cat:"s_tel" },
+      { id:"r4", kw:"ココカラファイン",       src:"all", cat:"h_daily" },
+    ],
+  };
+}
+
+const nk = s => String(s||"").normalize("NFKC").toLowerCase();
+const ymOf = d => d.slice(0,7);                       // "2026-09-30" → "2026-09"
+const ymLabel = ym => `${+ym.slice(0,4)}年${+ym.slice(5,7)}月`;
+const ymShift = (ym, n) => { const d = new Date(+ym.slice(0,4), +ym.slice(5,7)-1+n, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
+const curYM = () => keyOf(new Date()).slice(0,7);
+const mdS = d => `${+d.slice(5,7)}/${+d.slice(8,10)}`;
+let KYM = curYM();
+let K_MSG = "", K_MSG_ERR = false, PT_MSG = "", PT_MSG_ERR = false;
+let RULE_DRAFT = null;
+
+/* ---------- 月ごとのデータ保存 ---------- */
+const MONTHS = {};   // ym → { data, id, timer, loading }
+const freshMonth = () => ({ v:1, mf:[], pts:[], ov:{}, incomes:[], updatedAt:null });
+async function monthId(ym){ return sha256Hex("cashflow-tool:" + PASS + ":kakei:" + ym); }
+async function loadMonth(ym, force=false){
+  if (MONTHS[ym] && MONTHS[ym].data && !force) return MONTHS[ym].data;
+  const id = await monthId(ym);
+  let payload = null;
+  if (sb){
+    const { data, error } = await sb.from(TABLE).select("payload").eq("id", id).maybeSingle();
+    if (error) throw new Error("同期サーバーに接続できませんでした：" + error.message);
+    if (data) payload = data.payload;
+  }
+  if (!payload) payload = lsGet("cf_m_" + id);
+  let data = freshMonth();
+  if (payload){
+    try { data = Object.assign(freshMonth(), await decryptJSON(payload, PASS)); }
+    catch(e){ throw new Error(ymLabel(ym) + "のデータを読めませんでした。"); }
+  }
+  MONTHS[ym] = { ...(MONTHS[ym]||{}), data, id };
+  return data;
+}
+function saveMonthSoon(ym){
+  const m = MONTHS[ym]; if (!m) return;
+  clearTimeout(m.timer);
+  setSync("保存待ち…", false);
+  m.timer = setTimeout(()=>saveMonthNow(ym), 900);
+}
+async function saveMonthNow(ym){
+  const m = MONTHS[ym]; if (!m) return;
+  m.data.updatedAt = new Date().toISOString();
+  try{
+    const payload = await encryptJSON(m.data, PASS);
+    lsSet("cf_m_" + m.id, payload);
+    if (sb){
+      const { error } = await sb.from(TABLE).upsert({ id: m.id, payload, updated_at: m.data.updatedAt });
+      if (error) throw error;
+      setSync("同期済み " + timeStr(new Date()), false);
+    } else setSync("この端末に保存 " + timeStr(new Date()), false);
+  }catch(e){ setSync("同期失敗（端末には保存済み）", true); console.error(e); }
+}
+
+/* ---------- CSV（マネーフォワード） ---------- */
+function parseCSV(text){
+  const rows = []; let row = [], f = "", q = false;
+  for (let i=0; i<text.length; i++){
+    const ch = text[i];
+    if (q){
+      if (ch === '"'){ if (text[i+1] === '"'){ f += '"'; i++; } else q = false; }
+      else f += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ","){ row.push(f); f = ""; }
+    else if (ch === "\n" || ch === "\r"){
+      if (ch === "\r" && text[i+1] === "\n") i++;
+      row.push(f); f = ""; if (row.some(x=>x!=="")) rows.push(row); row = [];
+    } else f += ch;
+  }
+  if (f !== "" || row.length){ row.push(f); if (row.some(x=>x!=="")) rows.push(row); }
+  return rows;
+}
+function decodeCSV(buf){
+  let t = new TextDecoder("shift_jis").decode(buf);
+  if (!t.includes("計算対象")){
+    t = new TextDecoder("utf-8").decode(buf).replace(/^﻿/, "");
+  }
+  return t;
+}
+async function importMF(file){
+  const text = decodeCSV(await file.arrayBuffer());
+  const rows = parseCSV(text);
+  if (!rows.length) throw new Error("CSVが空です。");
+  const H = rows[0].map(h=>h.trim());
+  const col = name => H.indexOf(name);
+  const need = ["計算対象","日付","内容","金額（円）","保有金融機関","大項目","中項目","振替","ID"];
+  const miss = need.filter(n=>col(n)<0);
+  if (miss.length) throw new Error("マネーフォワードの入出金CSVではないようです（見つからない列：" + miss.join("、") + "）");
+  const recs = rows.slice(1).map(r=>{
+    const dm = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec((r[col("日付")]||"").trim());
+    if (!dm) return null;
+    return {
+      id: r[col("ID")], d: `${dm[1]}-${dm[2].padStart(2,"0")}-${dm[3].padStart(2,"0")}`,
+      t: r[col("内容")] || "", amt: parseInt(String(r[col("金額（円）")]).replace(/[^\d-]/g,""),10) || 0,
+      src: r[col("保有金融機関")] || "", l: r[col("大項目")] || "", m: r[col("中項目")] || "",
+      calc: r[col("計算対象")] === "1" ? 1 : 0, tr: r[col("振替")] === "1" ? 1 : 0,
+    };
+  }).filter(Boolean);
+  if (!recs.length) throw new Error("取り込める明細がありませんでした。");
+  const minD = recs.reduce((a,r)=>r.d<a?r.d:a, recs[0].d);
+  const maxD = recs.reduce((a,r)=>r.d>a?r.d:a, recs[0].d);
+  // CSVの期間に含まれる月を、その期間の分だけ入れ替える（手動の振り分けはIDで残る）
+  const months = []; for (let ym = ymOf(minD); ym <= ymOf(maxD); ym = ymShift(ym,1)) months.push(ym);
+  for (const ym of months){
+    const data = await loadMonth(ym);
+    data.mf = data.mf.filter(r=>r.d < minD || r.d > maxD).concat(recs.filter(r=>ymOf(r.d)===ym));
+    saveMonthSoon(ym);
+  }
+  return { count: recs.length, minD, maxD, months };
+}
+
+/* ---------- 楽天ポイント履歴の貼り付け ---------- */
+function parsePoints(text){
+  const toks = String(text).normalize("NFKC").split(/[\t\r\n]+/).map(s=>s.trim()).filter(Boolean);
+  const isY = t => /^\d{4}$/.test(t), isMD = t => /^\d{1,2}\/\d{1,2}$/.test(t), isYMD = t => /^\d{4}\s+\d{1,2}\/\d{1,2}$/.test(t);
+  const startAt = i => (isY(toks[i]) && isMD(toks[i+1]||"")) ? 2 : isYMD(toks[i]) ? 1 : 0;
+  const out = []; let skipped = 0, i = 0;
+  while (i < toks.length){
+    const s = startAt(i);
+    if (!s){ i++; continue; }
+    i += s;
+    const svc = toks[i++] || "";
+    const content = []; let d = null;
+    while (i < toks.length){
+      if (startAt(i)) break;
+      const t = toks[i++];
+      const mm = t.match(/\[(\d{4})\/(\d{1,2})\/(\d{1,2})\]\s*$/);
+      if (mm){
+        const pre = t.slice(0, mm.index).trim(); if (pre) content.push(pre);
+        d = `${mm[1]}-${mm[2].padStart(2,"0")}-${mm[3].padStart(2,"0")}`; break;
+      }
+      content.push(t);
+    }
+    if (!d) continue;
+    const st = []; let amt = null;
+    while (i < toks.length && !startAt(i)){
+      const t = toks[i];
+      if (/^[+-]?[\d,]+$/.test(t)){ amt = Math.abs(parseInt(t.replace(/[^\d]/g,""),10)); i++; break; }
+      st.push(t); i++;
+    }
+    if (amt == null) continue;
+    const status = st.join(" ");
+    if (/獲得|取消|キャンセル/.test(status) || !/利用/.test(status)){ skipped++; continue; }
+    out.push({ d, svc, t: content.join(""), st: status, amt });
+  }
+  // 同じ日・同じ内容・同じ額が複数ある場合も区別できるよう、出現順の番号を付ける
+  const seen = {};
+  out.forEach(r=>{ const base = [r.d, r.svc, r.t, r.amt].join("|"); seen[base] = (seen[base]||0) + 1; r.key = base + "#" + seen[base]; });
+  return { recs: out, skipped };
+}
+async function importPoints(text){
+  const { recs, skipped } = parsePoints(text);
+  if (!recs.length) throw new Error("ポイント利用の行を読み取れませんでした。楽天PointClubの「ポイント実績」ページの表を、日付の列から選択してコピーしてください。");
+  const byM = {};
+  recs.forEach(r=>{ (byM[ymOf(r.d)] = byM[ymOf(r.d)] || []).push(r); });
+  let added = 0, dup = 0;
+  for (const ym of Object.keys(byM)){
+    const data = await loadMonth(ym);
+    const keys = new Set(data.pts.map(p=>p.key));
+    byM[ym].forEach(r=>{ if (keys.has(r.key)) dup++; else { data.pts.push(r); keys.add(r.key); added++; } });
+    saveMonthSoon(ym);
+  }
+  return { added, dup, skipped, months: Object.keys(byM).sort() };
+}
+
+/* ---------- 振り分け ---------- */
+const catById = id => state.kakei.cats.find(c=>c.id===id);
+const isMarketSrc = r => r.src.startsWith("楽天市場");
+const isCardMarket = r => r.src.includes("楽天カード") && /楽天市場|ラクテンイチバ/.test(nk(r.t));
+function matchRule(text, kind){
+  const s = nk(text);
+  return state.kakei.rules.find(r=>r.kw && (r.src==="all" || r.src===kind) && s.includes(nk(r.kw)) && catById(r.cat));
+}
+function matchMap(r){
+  const M = state.kakei.mfMap.filter(x=>catById(x.cat));
+  return M.find(x=>x.l && x.m && x.l===r.l && x.m===r.m)
+      || M.find(x=>!x.l && x.m && x.m===r.m)
+      || M.find(x=>x.l && !x.m && x.l===r.l);
+}
+function classify(kind, r, text, ov){
+  if (ov && catById(ov)) return { cat: ov, how: "manual" };
+  const rule = matchRule(text, kind);
+  if (rule) return { cat: rule.cat, how: "rule" };
+  if (kind === "mf"){ const mp = matchMap(r); if (mp) return { cat: mp.cat, how: "map" }; }
+  const fallback = catById("h_other") ? "h_other" : (state.kakei.cats.find(c=>c.group==="house")||state.kakei.cats[0]).id;
+  return { cat: fallback, how: "default" };
+}
+function computeKakei(data){
+  const txs = [], marketRows = [], cardMarket = [];
+  data.mf.forEach(r=>{
+    const key = "m:" + r.id;
+    if (isMarketSrc(r)){ marketRows.push(r); return; }
+    const cm = isCardMarket(r);
+    if (cm) cardMarket.push(r);
+    if (!cm && (r.calc === 0 || r.tr === 1)) return;
+    if (r.amt > 0 && (r.l === "収入" || r.l === "未分類" || !r.l)) return;   // 収入・ポイント付与などは集計しない
+    const c = classify("mf", r, r.t, data.ov[key]);
+    txs.push({ key, kind:"mf", d:r.d, t:r.t, spend:-r.amt, cm, raw:r, ...c });
+  });
+  data.pts.forEach(p=>{
+    const key = "p:" + p.key;
+    const c = classify("pt", p, p.svc + " " + p.t, data.ov[key]);
+    txs.push({ key, kind:"pt", d:p.d, t:(p.svc ? "［" + p.svc + "］" : "") + p.t, spend:p.amt, cm:false, raw:p, ...c });
+  });
+  txs.sort((a,b)=> b.d.localeCompare(a.d) || b.spend - a.spend);
+  const byCat = {};
+  state.kakei.cats.forEach(c=> byCat[c.id] = { total:0, pts:0, list:[] });
+  txs.forEach(t=>{ const b = byCat[t.cat]; if (!b) return; b.total += t.spend; if (t.kind==="pt") b.pts += t.spend; b.list.push(t); });
+  const sumG = g => state.kakei.cats.filter(c=>c.group===g).reduce((a,c)=>a+byCat[c.id].total,0);
+  const house = sumG("house"), self = sumG("self");
+  const income = (data.incomes||[]).reduce((a,x)=>a+(+x.amount||0),0);
+  // MF側の振替漏れ（運用設定で見る側が変わる）
+  const leaks = (state.kakei.mfPolicy === "card")
+    ? cardMarket.filter(r=>r.calc===1 && r.tr===0)
+    : marketRows.filter(r=>r.calc===1 && r.tr===0);
+  // カード明細待ち（参考）：最後のカード側楽天市場明細より後の楽天市場の注文
+  const lastCard = cardMarket.reduce((a,r)=>r.d>a?r.d:a, "");
+  const pending = marketRows.filter(r=>r.amt<0 && r.d > lastCard);
+  const unassigned = txs.filter(t=>t.how==="default").length;
+  return { txs, byCat, house, self, income, balance: income - house, leaks, pending,
+           pendingSum: pending.reduce((a,r)=>a-r.amt,0), unassigned, marketRows, lastCard };
+}
+function marketHints(t, k){
+  if (!t.cm) return [];
+  const base = new Date(t.d);
+  return k.marketRows.filter(r=> r.amt < 0 && Math.abs((new Date(r.d) - base)/DAY) <= 3).slice(0,4);
+}
+function ruleKeywordFor(t){
+  const raw = String(t.kind==="pt" ? t.raw.t : t.raw.t).normalize("NFKC");
+  const cut = raw.split(/\s楽天ペイ|楽天ペイで|\s/)[0];
+  return cut.slice(0, 20);
+}
+
+/* ---------- 家計の画面 ---------- */
+function catOptions(sel, withAuto){
+  const g = (name, grp) => `<optgroup label="${name}">${state.kakei.cats.filter(c=>c.group===grp)
+    .map(c=>`<option value="${c.id}"${c.id===sel?" selected":""}>${esc(c.name)}</option>`).join("")}</optgroup>`;
+  return (withAuto ? `<option value="">（自動に戻す）</option>` : "") + g("家計","house") + g("個人","self") + g("対象外","skip");
+}
+function txHTML(t, k, data){
+  const tags = [
+    t.kind==="pt" ? `<span class="tag pt">ポイント</span>` : `<span class="tag">MF</span>`,
+    t.cm ? `<span class="tag">カード・楽天市場</span>` : "",
+    t.how==="default" ? `<span class="tag un">未振り分け</span>` : "",
+    t.how==="manual" ? `<span class="tag">手動</span>` : "",
+  ].join("");
+  const hints = marketHints(t, k);
+  return `
+    <div class="tx">
+      <div class="tx-top"><span class="tx-d num">${mdS(t.d)}</span><span class="tx-t">${esc(t.t)}</span><span class="tx-a num">${yen(t.spend)}</span></div>
+      <div class="tx-sub">${tags}<select data-txcat="${esc(t.key)}">${catOptions(t.cat, t.how==="manual")}</select></div>
+      ${hints.length ? `<div class="hintbox">前後3日の楽天市場の注文：${hints.map(h=>`${esc(h.t.slice(0,40))}（${esc(h.l)}${h.m?"/"+esc(h.m):""}・${yen(-h.amt)}）`).join("<br>")}</div>` : ""}
+    </div>`;
+}
+function ruleBarHTML(){
+  if (!RULE_DRAFT || !catById(RULE_DRAFT.cat)) return "";
+  return `
+    <div class="rulebar">
+      <div class="rb-t">「${esc(catById(RULE_DRAFT.cat).name)}」に移しました。同じ店も今後自動で振り分けますか？</div>
+      <div class="ruledraft">
+        <input type="text" id="rule-kw" value="${esc(RULE_DRAFT.kw)}">
+        <span>を含むもの</span>
+        <button class="btn small" id="rule-save">ルールにする</button>
+        <button class="btn ghost small" id="rule-close">今回だけ</button>
+      </div>
+    </div>`;
+}
+function catBlockHTML(c, k, showBudget, elapsed){
+  const b = k.byCat[c.id];
+  const budget = showBudget ? (+c.budget||0) : 0;
+  const pct = budget ? b.total / budget : 0;
+  const barCls = !budget ? "" : pct > 1 ? "over" : pct > elapsed ? "warn" : "";
+  const un = b.list.filter(t=>t.how==="default").length;
+  const sub = [
+    budget ? `目標 ${yen(budget)}・残り <b class="${budget-b.total<0?"neg":""}">${yen(budget-b.total)}</b>` : "",
+    b.pts ? `うちポイント ${yen(b.pts)}` : "",
+    `${b.list.length}件`, un ? `<span class="tag un">未振り分け ${un}</span>` : "",
+  ].filter(Boolean).join("・");
+  return `
+    <details class="cat${!b.list.length?" zero":""}" id="cat-${c.id}">
+      <summary>
+        <span class="cn">${esc(c.name)}</span><span class="ca num">${yen(b.total)}</span>
+        <span class="cs num">${sub}</span>
+        ${budget ? `<span class="bar"><i class="${barCls}" style="width:${Math.min(100, pct*100)}%"></i><b style="left:${elapsed*100}%"></b></span>` : ""}
+      </summary>
+      <div class="txlist">${b.list.length ? b.list.map(t=>txHTML(t,k)).join("") : `<div class="hint">明細はありません。</div>`}</div>
+    </details>`;
+}
+function monthNavHTML(){
+  return `<div class="monthnav"><button data-kym="-1">◀</button><span class="ym">${ymLabel(KYM)}</span><button data-kym="1">▶</button></div>`;
+}
+function elapsedRatio(ym){
+  const t = new Date(), cy = curYM();
+  if (ym < cy) return 1; if (ym > cy) return 0;
+  return t.getDate() / lastDayOf(t.getFullYear(), t.getMonth());
+}
+function kakeiViewHTML(data){
+  const k = computeKakei(data);
+  const el = elapsedRatio(KYM);
+  const cats = g => state.kakei.cats.filter(c=>c.group===g);
+  return `
+    ${monthNavHTML()}
+    <section class="hero">
+      <div class="label">家計の支出（${ymLabel(KYM)}・${Math.round(el*100)}%経過）</div>
+      <div class="big num">${yen(k.house)}</div>
+      <div class="stats">
+        <div class="stat"><div class="k">個人の支出</div><div class="v num">${yen(k.self)}</div></div>
+        <div class="stat"><div class="k">家計の収支（入金−家計支出）</div><div class="v num ${k.balance<0?"neg":""}">${yen(k.balance)}</div></div>
+        <div class="stat"><div class="k">家計の目標合計</div><div class="v num">${yen(cats("house").reduce((a,c)=>a+(+c.budget||0),0))}</div></div>
+        <div class="stat"><div class="k">入金合計</div><div class="v num">${yen(k.income)}</div></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>マネーフォワードのCSVを取り込む</h2>
+      <label class="btn ghost small filebtn">CSVファイルを選ぶ<input type="file" id="mf-file" accept=".csv,text/csv" hidden></label>
+      <div class="hint">マネーフォワードWebの「家計簿」→「入出金」→ ダウンロード（CSV）。月の途中でも何度でも取り込み直せます。手動で振り分けた分は残ります。</div>
+      ${K_MSG ? `<div class="alert ${K_MSG_ERR?"warn":"info"}">${esc(K_MSG)}</div>` : ""}
+      ${k.leaks.length ? `<details class="alert warn" id="d-leaks"><summary>マネーフォワードで振替漏れ ${k.leaks.length}件</summary>
+          <div class="hint" style="color:inherit">${state.kakei.mfPolicy==="card"?"楽天カード側の楽天市場分":"楽天市場（my Rakuten）側"}の行が計算対象のままです。マネーフォワードで振替にしてください（このツールの集計には影響しません）。</div>
+          ${k.leaks.map(r=>`<div class="leak num">${mdS(r.d)}　${esc(r.t.slice(0,36))}　${yen(r.amt)}</div>`).join("")}
+        </details>` : ""}
+      ${k.pending.length ? `<div class="alert amber">カード明細待ちの楽天市場の注文：${k.pending.length}件・${yen(k.pendingSum)}（参考・集計には未反映）</div>` : ""}
+      ${k.unassigned ? `<div class="alert amber">未振り分けが${k.unassigned}件あります（家計・その他に仮で入っています）。</div>` : ""}
+    </section>
+
+    <section>
+      <h2>家計</h2>
+      ${cats("house").map(c=>catBlockHTML(c,k,true,el)).join("")}
+    </section>
+
+    <section>
+      <h2>家計への入金</h2>
+      ${(data.incomes||[]).map((x,i)=>`
+        <div class="inc-row">
+          <input type="text" class="memo" data-kiname="${i}" value="${esc(x.name)}" placeholder="メモ（例：父より）">
+          <input class="money" inputmode="numeric" data-kinc="${i}" value="${fmtInput(x.amount)}" placeholder="0">
+          <button class="x" data-kidel="${i}" title="削除">×</button>
+        </div>`).join("")}
+      <button class="btn ghost small" id="kinc-add" style="margin-top:6px">＋ 入金を追加</button>
+    </section>
+
+    <section>
+      <h2>個人</h2>
+      ${cats("self").map(c=>catBlockHTML(c,k,false,el)).join("")}
+    </section>
+
+    <section>
+      <h2>集計しないもの</h2>
+      ${cats("skip").map(c=>catBlockHTML(c,k,false,el)).join("")}
+      <div class="hint">楽天市場（my Rakuten）の明細は、楽天カード側と二重になるため常に集計しません（カードの実際の請求額を使います）。</div>
+    </section>
+    ${kakeiSettingsHTML()}`;
+}
+function pointsViewHTML(data){
+  const k = computeKakei(data);
+  const pts = k.txs.filter(t=>t.kind==="pt");
+  const total = pts.filter(t=>catById(t.cat).group!=="skip").reduce((a,t)=>a+t.spend,0);
+  return `
+    <section>
+      <h2>楽天ポイントの利用履歴を貼り付け</h2>
+      <textarea class="paste" id="pt-text" placeholder="楽天PointClub「ポイント実績」の表を、日付の列からポイント数の列まで選択してコピーし、ここに貼り付け"></textarea>
+      <button class="btn" id="pt-import" style="margin-top:8px;width:100%">取り込む</button>
+      ${PT_MSG ? `<div class="alert ${PT_MSG_ERR?"warn":"info"}" style="margin-top:8px">${esc(PT_MSG)}</div>` : ""}
+      <div class="hint">前回と期間が重なっていても、同じ行は二重に数えません。獲得ポイントの行は自動で除きます。<br>店名などのルールで自動振り分けし、ルールにないものは「家計・その他」（未振り分け）に入ります。</div>
+    </section>
+    ${monthNavHTML()}
+    <section>
+      <h2>${ymLabel(KYM)}のポイント利用（集計分 ${yen(total)}）</h2>
+      ${pts.length ? pts.map(t=>txHTML(t,k)).join("") : `<div class="hint">この月のポイント利用はありません。</div>`}
+    </section>
+    ${kakeiSettingsHTML()}`;
+}
+function kakeiSettingsHTML(){
+  const K = state.kakei;
+  const sel = (attr, i, v) => `<select ${attr}="${i}">${catOptions(v,false)}</select>`;
+  return `
+    <section>
+      <details id="d-ksettings">
+        <summary>家計の設定</summary>
+        <div class="gap"></div>
+        <h2>マネーフォワードで振替にしている側</h2>
+        <label class="radio"><input type="radio" name="mfpol" value="market"${K.mfPolicy!=="card"?" checked":""}> 楽天市場（my Rakuten）側を振替</label>
+        <label class="radio"><input type="radio" name="mfpol" value="card"${K.mfPolicy==="card"?" checked":""}> 楽天カード側を振替</label>
+        <div class="hint">「振替漏れ」の一覧に出す行が変わるだけで、このツールの集計は変わりません。</div>
+
+        <div class="gap"></div><h2>カテゴリと目標（家計のみ）</h2>
+        ${K.cats.map((c,i)=>`
+          <div class="kset cat3">
+            <input type="text" value="${esc(c.name)}" data-kcname="${i}">
+            <span class="sim-sub">${c.group==="house"?"家計":c.group==="self"?"個人":"対象外"}</span>
+            ${c.group==="house" ? `<input type="text" inputmode="numeric" class="money sm" data-kcbud="${i}" value="${fmtInput(c.budget)}" placeholder="目標">` : `<span></span>`}
+            ${["h_other","x_skip"].includes(c.id) ? `<span></span>` : `<button class="x" data-kcdel="${i}" title="削除">×</button>`}
+          </div>`).join("")}
+        <div class="flex"><button class="btn ghost small" data-kcadd="house">＋ 家計</button><button class="btn ghost small" data-kcadd="self">＋ 個人</button><button class="btn ghost small" data-kcadd="skip">＋ 対象外</button></div>
+
+        <div class="gap"></div><h2>キーワードのルール（上が優先）</h2>
+        <div class="hint" style="margin:0 0 4px">内容・店名にこの言葉を含むものを振り分けます。対象：全部／MF／ポイント</div>
+        ${K.rules.map((r,i)=>`
+          <div class="kset rule4">
+            <input type="text" value="${esc(r.kw)}" data-krkw="${i}">
+            <select data-krsrc="${i}">${[["all","全部"],["mf","MF"],["pt","ポイント"]].map(([v,n])=>`<option value="${v}"${r.src===v?" selected":""}>${n}</option>`).join("")}</select>
+            ${sel("data-krcat", i, r.cat)}
+            <button class="x" data-krdel="${i}" title="削除">×</button>
+          </div>`).join("")}
+        <button class="btn ghost small" id="kr-add">＋ ルールを追加</button>
+
+        <div class="gap"></div><h2>マネーフォワードの項目との対応</h2>
+        <div class="hint" style="margin:0 0 4px">大項目／中項目（空欄はどれでも）→ カテゴリ。キーワードのルールが優先されます。</div>
+        ${K.mfMap.map((x,i)=>`
+          <div class="kset map4">
+            <input type="text" value="${esc(x.l)}" data-kml="${i}" placeholder="大項目">
+            <input type="text" value="${esc(x.m)}" data-kmm="${i}" placeholder="中項目">
+            ${sel("data-kmcat", i, x.cat)}
+            <button class="x" data-kmdel="${i}" title="削除">×</button>
+          </div>`).join("")}
+        <button class="btn ghost small" id="km-add">＋ 対応を追加</button>
+      </details>
+    </section>`;
+}
+
+function renderKakei(){
+  const app = document.getElementById("app");
+  const m = MONTHS[KYM];
+  const openDetails = [...document.querySelectorAll("details[open]")].map(d=>d.id);
+  const scrollY = window.scrollY;
+  let body;
+  if (!m || !m.data){
+    body = `${monthNavHTML()}<section><div class="hint">読み込み中…</div></section>`;
+    loadMonth(KYM).then(()=>{ if (isKakeiView()) render(); })
+      .catch(e=>{ K_MSG = e.message; K_MSG_ERR = true; MONTHS[KYM] = { data: freshMonth(), id: null }; render(); });
+  } else body = VIEW === "points" ? pointsViewHTML(m.data) : kakeiViewHTML(m.data);
+  app.innerHTML = `
+  <div class="wrap">
+    ${headerHTML()}
+    <div class="tabs two">
+      <button data-view="kakei" class="${VIEW==="kakei"?"on":""}">今月の家計<small>MF＋ポイント</small></button>
+      <button data-view="points" class="${VIEW==="points"?"on":""}">ポイント<small>楽天ポイント履歴</small></button>
+    </div>
+    ${body}
+  </div>
+  ${ruleBarHTML()}`;
+  openDetails.forEach(id=>{ const d=document.getElementById(id); if(d) d.open=true; });
+  window.scrollTo(0, scrollY);
+  bindCommon(); bindKakei();
+}
+function headerHTML(){
+  return `
+    <header class="top">
+      <h1>家計チェック</h1>
+      <span id="sync" class="sync${syncErr?" err":""}">${esc(syncMsg)}</span>
+    </header>
+    <div class="mode">
+      <button data-mode="pay" class="${!isKakeiView()?"on":""}">引落</button>
+      <button data-mode="kakei" class="${isKakeiView()?"on":""}">家計</button>
+    </div>`;
+}
+let LAST_PAY_VIEW = "conf", LAST_KAKEI_VIEW = "kakei";
+function bindCommon(){
+  const app = document.getElementById("app");
+  app.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{
+    VIEW = b.dataset.view; lsSet(LS_VIEW, VIEW); RULE_DRAFT = null; render(); window.scrollTo(0,0);
+  });
+  app.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{
+    if (b.dataset.mode === "kakei"){ if (!isKakeiView()) LAST_PAY_VIEW = VIEW; VIEW = LAST_KAKEI_VIEW; }
+    else { if (isKakeiView()) LAST_KAKEI_VIEW = VIEW; VIEW = LAST_PAY_VIEW; }
+    lsSet(LS_VIEW, VIEW); render(); window.scrollTo(0,0);
+  });
+}
+function bindKakei(){
+  const app = document.getElementById("app");
+  const m = MONTHS[KYM]; const data = m && m.data;
+  const K = state.kakei;
+  const saveS = () => { scheduleSave(); render(); };
+  app.querySelectorAll("[data-kym]").forEach(b=>b.onclick=()=>{ KYM = ymShift(KYM, +b.dataset.kym); RULE_DRAFT = null; K_MSG = ""; render(); });
+  if (!data) return;
+
+  const f = document.getElementById("mf-file");
+  if (f) f.onchange = async ()=>{
+    const file = f.files[0]; if (!file) return;
+    K_MSG = "取り込み中…"; K_MSG_ERR = false; render();
+    try{
+      const r = await importMF(file);
+      KYM = r.months[r.months.length-1];
+      K_MSG = `${r.count}件を取り込みました（${mdS(r.minD)}〜${mdS(r.maxD)}）。`; K_MSG_ERR = false;
+    }catch(e){ K_MSG = e.message; K_MSG_ERR = true; }
+    render();
+  };
+  const pb = document.getElementById("pt-import");
+  if (pb) pb.onclick = async ()=>{
+    const text = document.getElementById("pt-text").value;
+    try{
+      const r = await importPoints(text);
+      KYM = r.months[r.months.length-1];
+      PT_MSG = `新しく${r.added}件を取り込みました${r.dup?`（重複${r.dup}件は除外）`:""}${r.skipped?`／獲得などの行${r.skipped}件は対象外`:""}。`; PT_MSG_ERR = false;
+    }catch(e){ PT_MSG = e.message; PT_MSG_ERR = true; }
+    render();
+  };
+
+  // 明細のカテゴリ変更 → 手動振り分け＋ルール化の提案
+  app.querySelectorAll("[data-txcat]").forEach(s=>s.addEventListener("change", ()=>{
+    const key = s.dataset.txcat;
+    if (!s.value){ delete data.ov[key]; RULE_DRAFT = null; }
+    else {
+      data.ov[key] = s.value;
+      const k = computeKakei(data); const t = k.txs.find(x=>x.key===key);
+      RULE_DRAFT = t ? { key, kw: ruleKeywordFor(t), cat: s.value, kind: t.kind } : null;
+    }
+    saveMonthSoon(KYM); render();
+  }));
+  const rs = document.getElementById("rule-save");
+  if (rs) rs.onclick = ()=>{
+    const kw = document.getElementById("rule-kw").value.trim();
+    if (kw){
+      K.rules.unshift({ id:"r"+Date.now(), kw: kw.normalize("NFKC"), src: "all", cat: RULE_DRAFT.cat });
+      delete data.ov[RULE_DRAFT.key]; saveMonthSoon(KYM);
+    }
+    RULE_DRAFT = null; saveS();
+  };
+  const rc = document.getElementById("rule-close");
+  if (rc) rc.onclick = ()=>{ RULE_DRAFT = null; render(); };
+
+  // 入金
+  const ka = document.getElementById("kinc-add");
+  if (ka) ka.onclick = ()=>{ data.incomes = data.incomes || []; data.incomes.push({ id:"k"+Date.now(), name:"", amount:0 }); saveMonthSoon(KYM); render(); };
+  app.querySelectorAll("[data-kidel]").forEach(b=>b.onclick=()=>{ data.incomes.splice(+b.dataset.kidel,1); saveMonthSoon(KYM); render(); });
+  app.querySelectorAll("[data-kiname]").forEach(el=>el.addEventListener("change", ()=>{ data.incomes[+el.dataset.kiname].name = el.value.trim(); saveMonthSoon(KYM); }));
+  app.querySelectorAll("[data-kinc]").forEach(el=>{
+    el.addEventListener("focus", ()=>{ el.value = el.value.replace(/,/g,""); el.select(); });
+    el.addEventListener("change", ()=>{ data.incomes[+el.dataset.kinc].amount = parseYen(el.value); saveMonthSoon(KYM); render(); });
+    el.addEventListener("keydown", e=>{ if (e.key==="Enter") el.blur(); });
+  });
+
+  // 設定
+  app.querySelectorAll('input[name="mfpol"]').forEach(r=>r.onchange=()=>{ K.mfPolicy = r.value; saveS(); });
+  const onK = (sel, fn) => app.querySelectorAll(sel).forEach(el=>el.addEventListener("change", ()=>{ fn(el); saveS(); }));
+  onK("[data-kcname]", el=>K.cats[+el.dataset.kcname].name = el.value.trim() || "カテゴリ");
+  onK("[data-kcbud]",  el=>K.cats[+el.dataset.kcbud].budget = parseYen(el.value));
+  app.querySelectorAll("[data-kcbud]").forEach(el=>el.addEventListener("focus", ()=>{ el.value = el.value.replace(/,/g,""); el.select(); }));
+  app.querySelectorAll("[data-kcdel]").forEach(b=>b.onclick=()=>{
+    const c = K.cats[+b.dataset.kcdel];
+    if (confirm(`カテゴリ「${c.name}」を削除しますか？（振り分けられていた明細は自動の振り分けに戻ります）`)){ K.cats.splice(+b.dataset.kcdel,1); saveS(); }
+  });
+  app.querySelectorAll("[data-kcadd]").forEach(b=>b.onclick=()=>{
+    const g = b.dataset.kcadd;
+    K.cats.push({ id: g[0]+"_"+Date.now(), name:"新しいカテゴリ", group: g, ...(g==="house"?{budget:0}:{}) });
+    saveS();
+  });
+  onK("[data-krkw]",  el=>K.rules[+el.dataset.krkw].kw = el.value.trim().normalize("NFKC"));
+  onK("[data-krsrc]", el=>K.rules[+el.dataset.krsrc].src = el.value);
+  onK("[data-krcat]", el=>K.rules[+el.dataset.krcat].cat = el.value);
+  app.querySelectorAll("[data-krdel]").forEach(b=>b.onclick=()=>{ K.rules.splice(+b.dataset.krdel,1); saveS(); });
+  const kra = document.getElementById("kr-add");
+  if (kra) kra.onclick = ()=>{ K.rules.unshift({ id:"r"+Date.now(), kw:"", src:"all", cat:"h_other" }); saveS(); };
+  onK("[data-kml]",   el=>K.mfMap[+el.dataset.kml].l = el.value.trim());
+  onK("[data-kmm]",   el=>K.mfMap[+el.dataset.kmm].m = el.value.trim());
+  onK("[data-kmcat]", el=>K.mfMap[+el.dataset.kmcat].cat = el.value);
+  app.querySelectorAll("[data-kmdel]").forEach(b=>b.onclick=()=>{ K.mfMap.splice(+b.dataset.kmdel,1); saveS(); });
+  const kma = document.getElementById("km-add");
+  if (kma) kma.onclick = ()=>{ K.mfMap.push({ l:"", m:"", cat:"h_other" }); saveS(); };
 }
 
 /* ---------- 起動 ---------- */
-VIEW = ["conf","open","sim"].includes(lsGet(LS_VIEW)) ? lsGet(LS_VIEW) : "conf";
+VIEW = ["conf","open","sim","kakei","points"].includes(lsGet(LS_VIEW)) ? lsGet(LS_VIEW) : "conf";
 (async ()=>{
   const saved = lsGet(LS_PASS);
   if (saved){
@@ -766,6 +1430,7 @@ document.addEventListener("visibilitychange", async ()=>{
       }
     }
     if (rollOver(new Date())) scheduleSave();
+    if (isKakeiView() && sb && MONTHS[KYM]) await loadMonth(KYM, true);
     render();
   }catch(e){}
 });
