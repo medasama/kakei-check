@@ -186,6 +186,11 @@
   .kset.map4{grid-template-columns:1fr 1fr 1fr 28px}
   .kset input.money.sm{width:100%;padding:6px}
   .radio{display:flex;gap:8px;align-items:center;font-size:14px;margin:6px 0}
+  .inc-row.dated{grid-template-columns:112px 1fr 92px 22px;gap:5px}
+  .inc-row .fdate{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 4px;width:100%;min-width:0}
+  .inc-row.dated input.money{width:100%}
+  .inc-row.passed > input{opacity:.45}
+  .passed-tag{grid-column:1/-1;font-size:11px;color:var(--sub)}
   .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
 </style>
 </head>
@@ -460,32 +465,49 @@ function buildTimeline(start, items){
   let bal = start;
   return [...groups.values()].sort((a,b)=>a.date-b.date).map(g=>{ bal -= g.sum; return { ...g, balance:bal }; });
 }
+// 入出金予定：日付なし→最初から反映／日付あり→その日に反映（日付を過ぎたら「済み」で計算から外す）
+const parseYMD = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v||""); return m ? new Date(+m[1], +m[2]-1, +m[3]) : null; };
+const isPassed = (x, today) => { const d = parseYMD(x.date); return !!d && d < ymd(today); };
+function flowParts(incomes, outgoes, today){
+  const act = l => l.filter(x=>!isPassed(x, today));
+  const undated = l => act(l).filter(x=>!parseYMD(x.date)).reduce((a,x)=>a+(+x.amount||0),0);
+  const items = [
+    ...act(incomes).filter(x=>parseYMD(x.date) && +x.amount).map(x=>({ date:parseYMD(x.date), name:x.name||"入金予定", amount:-(+x.amount) })),
+    ...act(outgoes).filter(x=>parseYMD(x.date) && +x.amount).map(x=>({ date:parseYMD(x.date), name:x.name||"出金予定", amount:+x.amount })),
+  ];
+  const net = act(incomes).reduce((a,x)=>a+(+x.amount||0),0) - act(outgoes).reduce((a,x)=>a+(+x.amount||0),0);
+  return { undatedNet: undated(incomes) - undated(outgoes), items, net };
+}
 function compute(){
   const today = new Date();
-  const sumInc = list => list.reduce((a,x)=>a+(+x.amount||0),0);
-  const fundsTotal = state.funds.reduce((a,f)=>a+(+f.amount||0),0) + sumInc(state.incomes) - sumInc(state.outgoes);
   const rows = state.cards.map(c=>({ card:c, sch: schedules(c, today) }));
+  const balConf = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
+  const fc = flowParts(state.incomes, state.outgoes, today);
+  const fundsTotal = balConf + fc.net;                       // 残高＋入金予定−出金予定（済みを除く）
 
   // 確定分（未引落のもの）
   const confItems = rows.filter(r=>!r.sch.conf.paid && r.card.conf.amt)
     .map(r=>({ date:r.sch.conf.withdraw, name:shortName(r.card.name), amount:r.card.conf.amt }));
   const confTotal = confItems.reduce((a,i)=>a+i.amount,0);
-  const confTimeline = buildTimeline(fundsTotal, confItems);
+  const confStart = balConf + fc.undatedNet;
+  const confTimeline = buildTimeline(confStart, confItems.concat(fc.items));
   const afterConf = fundsTotal - confTotal;
 
-  // 途中経過（利用中）：確定分とは別に入れた（仮）の残高・入金予定からスタート
-  const openStart = state.funds.reduce((a,f)=>a+(+f.openAmount||0),0) + sumInc(state.openIncomes) - sumInc(state.openOutgoes);
+  // 途中経過（利用中）：確定分とは別に入れた（仮）の残高・入出金予定からスタート
+  const balOpen = state.funds.reduce((a,f)=>a+(+f.openAmount||0),0);
+  const fo = flowParts(state.openIncomes, state.openOutgoes, today);
+  const openStart = balOpen + fo.net;
   const openItems = rows.filter(r=>r.sch.open.predicted)
     .map(r=>({ date:r.sch.open.withdraw, name:shortName(r.card.name), amount:r.sch.open.predicted }));
   const openCurrent = state.cards.reduce((a,c)=>a+(+c.open.amt||0),0);
   const openPredicted = openItems.reduce((a,i)=>a+i.amount,0);
-  const openTimeline = buildTimeline(openStart, openItems);
+  const openTlStart = balOpen + fo.undatedNet;
+  const openTimeline = buildTimeline(openTlStart, openItems.concat(fo.items));
 
-  return { today, fundsTotal, rows, confTotal, confTimeline, afterConf,
-           openStart, openCurrent, openPredicted, openTimeline,
+  return { today, fundsTotal, rows, confTotal, confStart, confTimeline, afterConf,
+           openStart, openTlStart, openCurrent, openPredicted, openTimeline,
            openOutlook: openStart - openPredicted };
 }
-
 /* ---------- 画面 ---------- */
 function renderLock(errMsg=""){
   document.getElementById("app").innerHTML = `
@@ -529,7 +551,7 @@ function timelineHTML(startLabel, start, tl){
     ${tl.length ? tl.map(g=>`
       <div class="tl-row${g.balance<0?" short":""}">
         <div class="tl-date num">${md(g.date)}</div>
-        <div class="tl-cards">${g.names.map(esc).join("・")}<br><span class="num">−${yen(g.sum)}</span></div>
+        <div class="tl-cards">${g.names.map(esc).join("・")}<br><span class="num">${g.sum >= 0 ? "−" + yen(g.sum) : "＋" + yen(-g.sum)}</span></div>
         <div class="tl-amt"><div class="tl-bal num ${g.balance<0?"neg":""}">${yen(g.balance)}</div></div>
       </div>`).join("") : `<div class="hint">金額が入っていません。</div>`}
     ${tl.some(g=>g.balance<0) ? `<div class="note">赤い日に残高が足りなくなる見込みです。</div>`:""}`;
@@ -537,6 +559,17 @@ function timelineHTML(startLabel, start, tl){
 
 // 入金予定・出金予定のリスト（conf / open / out-conf / out-open）
 const incList = mode => ({ conf:state.incomes, open:state.openIncomes, "out-conf":state.outgoes, "out-open":state.openOutgoes })[mode];
+function flowRowHTML(x, i, list, ph){
+  const passed = isPassed(x, new Date());
+  return `
+    <div class="inc-row dated${passed?" passed":""}">
+      <input type="date" class="fdate" data-idate="${i}" data-list="${list}" value="${esc(x.date||"")}" title="日付（任意）">
+      <input type="text" class="memo" data-iname="${i}" data-list="${list}" value="${esc(x.name)}" placeholder="${ph}">
+      <input class="money" inputmode="numeric" data-inc="${i}" data-list="${list}" value="${fmtInput(x.amount)}" placeholder="0">
+      <button class="x" data-idel="${i}" data-list="${list}" title="削除">×</button>
+      ${passed ? `<span class="passed-tag">済み（計算から除外）</span>` : ""}
+    </div>`;
+}
 function fundsHTML(mode){
   const isOpen = mode === "open";
   const list = incList(mode), outs = incList("out-" + mode);
@@ -551,24 +584,14 @@ function fundsHTML(mode){
           <input class="money" inputmode="numeric" ${isOpen?`data-ofund="${i}"`:`data-fund="${i}"`} value="${fmtInput(isOpen ? f.openAmount : f.amount)}" placeholder="0">
         </div>`).join("")}
       <div class="inc-head">入金予定${isOpen?"（仮）":""}</div>
-      ${list.map((x,i)=>`
-        <div class="inc-row">
-          <input type="text" class="memo" data-iname="${i}" data-list="${mode}" value="${esc(x.name)}" placeholder="メモ（例：母入金）">
-          <input class="money" inputmode="numeric" data-inc="${i}" data-list="${mode}" value="${fmtInput(x.amount)}" placeholder="0">
-          <button class="x" data-idel="${i}" data-list="${mode}" title="削除">×</button>
-        </div>`).join("")}
+      ${list.map((x,i)=>flowRowHTML(x, i, mode, "メモ")).join("")}
       <button class="btn ghost small" data-iadd="${mode}" style="margin-top:6px">＋ 入金予定を追加</button>
-      ${list.length ? `<div class="hint">入金予定の合計：${yen(list.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
+      ${list.length ? `<div class="hint">入金予定の合計：${yen(list.filter(x=>!isPassed(x,new Date())).reduce((a,x)=>a+(+x.amount||0),0))}（済みを除く）</div>` : ""}
       <div class="inc-head">出金予定（カード以外）${isOpen?"（仮）":""}</div>
-      ${outs.map((x,i)=>`
-        <div class="inc-row">
-          <input type="text" class="memo" data-iname="${i}" data-list="out-${mode}" value="${esc(x.name)}" placeholder="メモ（例：家賃、税金）">
-          <input class="money" inputmode="numeric" data-inc="${i}" data-list="out-${mode}" value="${fmtInput(x.amount)}" placeholder="0">
-          <button class="x" data-idel="${i}" data-list="out-${mode}" title="削除">×</button>
-        </div>`).join("")}
+      ${outs.map((x,i)=>flowRowHTML(x, i, "out-" + mode, "メモ")).join("")}
       <button class="btn ghost small" data-iadd="out-${mode}" style="margin-top:6px">＋ 出金予定を追加</button>
-      ${outs.length ? `<div class="hint">出金予定の合計：${yen(outs.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
-      <div class="hint">資金合計${isOpen?"（仮）":""} ＝ 残高 ＋ 入金予定 − 出金予定</div>
+      ${outs.length ? `<div class="hint">出金予定の合計：${yen(outs.filter(x=>!isPassed(x,new Date())).reduce((a,x)=>a+(+x.amount||0),0))}（済みを除く）</div>` : ""}
+      <div class="hint">資金合計${isOpen?"（仮）":""} ＝ 残高 ＋ 入金予定 − 出金予定。日付を入れた予定はその日に「引落の流れ」に入り、日付を過ぎると「済み」になって計算から外れます（×で消してください）。日付なしは最初から反映します。</div>
     </section>`;
 }
 
@@ -583,7 +606,7 @@ function confViewHTML(r){
         <div class="stat"><div class="k">確定分の引落合計（未引落）</div><div class="v num">${yen(r.confTotal)}</div></div>
       </div>
     </section>
-    <section><h2>引落の流れ（確定分）</h2>${timelineHTML("資金合計", r.fundsTotal, r.confTimeline)}</section>
+    <section><h2>引落の流れ（確定分）</h2>${timelineHTML("残高＋日付なしの入出金", r.confStart, r.confTimeline)}</section>
     ${fundsHTML("conf")}
     <section>
       <h2>確定分の請求額（明細の確定額を入力）</h2>
@@ -615,7 +638,7 @@ function openViewHTML(r){
 
     <section>
       <h2>引落の流れ（途中経過）</h2>
-      ${timelineHTML("資金合計（仮）", r.openStart, r.openTimeline)}
+      ${timelineHTML("残高（仮）＋日付なしの入出金", r.openTlStart, r.openTimeline)}
     </section>
 
     ${fundsHTML("open")}
@@ -765,6 +788,9 @@ function bind(){
       list.splice(+b.dataset.idel,1); scheduleSave(); render();
     }
   });
+  app.querySelectorAll("[data-idate]").forEach(el=>el.addEventListener("change", ()=>{
+    incList(el.dataset.list)[+el.dataset.idate].date = el.value || ""; scheduleSave(); render();
+  }));
   app.querySelectorAll("[data-iname]").forEach(el=>el.addEventListener("change", ()=>{
     incList(el.dataset.list)[+el.dataset.iname].name = el.value.trim(); scheduleSave();
   }));
