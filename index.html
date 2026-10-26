@@ -189,8 +189,7 @@
   .inc-row.dated{grid-template-columns:112px 1fr 92px 22px;gap:5px}
   .inc-row .fdate{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 4px;width:100%;min-width:0}
   .inc-row.dated input.money{width:100%}
-  .inc-row.passed > input{opacity:.45}
-  .passed-tag{grid-column:1/-1;font-size:11px;color:var(--sub)}
+  .passed-tag{grid-column:1/-1;font-size:11px;color:var(--amber)}
   .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
 </style>
 </head>
@@ -469,7 +468,7 @@ function buildTimeline(start, items){
 const parseYMD = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v||""); return m ? new Date(+m[1], +m[2]-1, +m[3]) : null; };
 const isPassed = (x, today) => { const d = parseYMD(x.date); return !!d && d < ymd(today); };
 function flowParts(incomes, outgoes, today){
-  const act = l => l.filter(x=>!isPassed(x, today));
+  const act = l => l;   // 自動では外さない（済んだら自分で×で消す）
   const undated = l => act(l).filter(x=>!parseYMD(x.date)).reduce((a,x)=>a+(+x.amount||0),0);
   const items = [
     ...act(incomes).filter(x=>parseYMD(x.date) && +x.amount).map(x=>({ date:parseYMD(x.date), name:x.name||"入金予定", amount:-(+x.amount) })),
@@ -483,10 +482,10 @@ function compute(){
   const rows = state.cards.map(c=>({ card:c, sch: schedules(c, today) }));
   const balConf = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
   const fc = flowParts(state.incomes, state.outgoes, today);
-  const fundsTotal = balConf + fc.net;                       // 残高＋入金予定−出金予定（済みを除く）
+  const fundsTotal = balConf + fc.net;                       // 残高＋入金予定−出金予定
 
   // 確定分（未引落のもの）
-  const confItems = rows.filter(r=>!r.sch.conf.paid && r.card.conf.amt)
+  const confItems = rows.filter(r=>r.card.conf.amt)          // 引落日を過ぎても自動では外さない（済んだら0にする）
     .map(r=>({ date:r.sch.conf.withdraw, name:shortName(r.card.name), amount:r.card.conf.amt }));
   const confTotal = confItems.reduce((a,i)=>a+i.amount,0);
   const confStart = balConf + fc.undatedNet;
@@ -562,12 +561,12 @@ const incList = mode => ({ conf:state.incomes, open:state.openIncomes, "out-conf
 function flowRowHTML(x, i, list, ph){
   const passed = isPassed(x, new Date());
   return `
-    <div class="inc-row dated${passed?" passed":""}">
+    <div class="inc-row dated">
       <input type="date" class="fdate" data-idate="${i}" data-list="${list}" value="${esc(x.date||"")}" title="日付（任意）">
       <input type="text" class="memo" data-iname="${i}" data-list="${list}" value="${esc(x.name)}" placeholder="${ph}">
       <input class="money" inputmode="numeric" data-inc="${i}" data-list="${list}" value="${fmtInput(x.amount)}" placeholder="0">
       <button class="x" data-idel="${i}" data-list="${list}" title="削除">×</button>
-      ${passed ? `<span class="passed-tag">済み（計算から除外）</span>` : ""}
+      ${passed ? `<span class="passed-tag">日付を過ぎています（済んでいたら×で消してください）</span>` : ""}
     </div>`;
 }
 function fundsHTML(mode){
@@ -586,12 +585,12 @@ function fundsHTML(mode){
       <div class="inc-head">入金予定${isOpen?"（仮）":""}</div>
       ${list.map((x,i)=>flowRowHTML(x, i, mode, "メモ")).join("")}
       <button class="btn ghost small" data-iadd="${mode}" style="margin-top:6px">＋ 入金予定を追加</button>
-      ${list.length ? `<div class="hint">入金予定の合計：${yen(list.filter(x=>!isPassed(x,new Date())).reduce((a,x)=>a+(+x.amount||0),0))}（済みを除く）</div>` : ""}
+      ${list.length ? `<div class="hint">入金予定の合計：${yen(list.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
       <div class="inc-head">出金予定（カード以外）${isOpen?"（仮）":""}</div>
       ${outs.map((x,i)=>flowRowHTML(x, i, "out-" + mode, "メモ")).join("")}
       <button class="btn ghost small" data-iadd="out-${mode}" style="margin-top:6px">＋ 出金予定を追加</button>
-      ${outs.length ? `<div class="hint">出金予定の合計：${yen(outs.filter(x=>!isPassed(x,new Date())).reduce((a,x)=>a+(+x.amount||0),0))}（済みを除く）</div>` : ""}
-      <div class="hint">資金合計${isOpen?"（仮）":""} ＝ 残高 ＋ 入金予定 − 出金予定。日付を入れた予定はその日に「引落の流れ」に入り、日付を過ぎると「済み」になって計算から外れます（×で消してください）。日付なしは最初から反映します。</div>
+      ${outs.length ? `<div class="hint">出金予定の合計：${yen(outs.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
+      <div class="hint">資金合計${isOpen?"（仮）":""} ＝ 残高 ＋ 入金予定 − 出金予定。入れた予定は×で消すまで計算に入ります。日付を入れると「引落の流れ」でその日の位置に並びます（日付なしは最初に反映）。</div>
     </section>`;
 }
 
@@ -611,14 +610,14 @@ function confViewHTML(r){
     <section>
       <h2>確定分の請求額（明細の確定額を入力）</h2>
       ${r.rows.map(({card:c,sch:s},i)=>`
-        <div class="row${s.conf.paid?" paid":""}">
+        <div class="row">
           <div class="name">
-            <div class="n">${esc(c.name)}${s.conf.paid?`<span class="badge done">引落済み</span>`:""}${c.conf.carried&&!s.conf.paid?`<span class="badge carry">途中入力から繰越</span>`:""}</div>
+            <div class="n">${esc(c.name)}${s.conf.paid && c.conf.amt ? `<span class="badge carry">引落日を過ぎています</span>` : ""}${c.conf.carried && !s.conf.paid ? `<span class="badge carry">途中入力から繰越</span>` : ""}</div>
             <div class="meta num">${md(s.conf.start)}〜${md(s.conf.end)}締め → <b>${md(s.conf.withdraw)}引落</b></div>
           </div>
           <input class="money" inputmode="numeric" data-conf="${i}" value="${fmtInput(c.conf.amt)}" placeholder="0">
         </div>`).join("")}
-      <div class="hint">「途中入力から繰越」は、締め前に途中経過タブで入れた額が自動で移ったものです。明細の確定額で上書きしてください。引落日を過ぎたカードは計算から外します。</div>
+      <div class="hint">「途中入力から繰越」は、締め前に途中経過タブで入れた額が自動で移ったものです。明細の確定額で上書きしてください。引落日を過ぎても自動では外さないので、引落が済んだら残高を入れ直し、そのカードを0にしてください。</div>
     </section>`;
 }
 
