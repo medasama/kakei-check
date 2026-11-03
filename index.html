@@ -122,6 +122,11 @@
   .mode button{border:1px solid var(--line);background:var(--card);color:var(--sub);border-radius:10px;padding:8px;font-weight:700;font-size:14px}
   .mode button.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
   .tabs.two{grid-template-columns:1fr 1fr}
+  .tabs.four{grid-template-columns:1fr 1fr 1fr 1.15fr}
+  .tabs.four button{padding:8px 2px;font-size:13.5px}
+  .badge.st-closed{background:var(--accent-soft);color:var(--accent)}
+  .badge.st-open{background:var(--amber-soft);color:var(--amber)}
+  .badge.st-before{background:var(--line);color:var(--sub)}
   .monthnav{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px}
   .monthnav button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:9px;padding:6px 14px}
   .monthnav .ym{font-weight:700;font-size:16px}
@@ -189,7 +194,12 @@
   .inc-row.dated{grid-template-columns:112px 1fr 92px 22px;gap:5px}
   .inc-row .fdate{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 4px;width:100%;min-width:0}
   .inc-row.dated input.money{width:100%}
-  .passed-tag{grid-column:1/-1;font-size:11px;color:var(--amber)}
+  .passed-tag{grid-column:1/-1;font-size:11.5px;color:var(--amber);font-weight:600}
+  .inc-row.due{background:var(--amber-soft);border-radius:10px;padding:8px;margin:4px -8px;border-top:none}
+  .row.due{background:var(--amber-soft);margin:0 -14px;padding:8px 14px}
+  .badge.due{background:var(--amber);color:#fff}
+  .due-msg{font-size:11.5px;color:var(--amber);margin-top:2px}
+  .tl-due{font-size:10.5px;color:var(--amber);font-weight:700}
   .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
 </style>
 </head>
@@ -232,14 +242,13 @@ const DEFAULT_FUNDS = [
 const emptyAmt = () => ({ amt:0, end:null, carried:false });
 function freshState(){
   return {
-    v:2,
-    cards: DEFAULT_CARDS.map(c=>({ ...c, conf:emptyAmt(), open:emptyAmt() })),
-    funds: DEFAULT_FUNDS.map(f=>({ ...f, amount:0, openAmount:0 })),
+    v:4,
+    cards: DEFAULT_CARDS.map(c=>({ ...c, amts:{} })),   // amts：引落日（YYYY-MM-DD）ごとの金額
+    funds: DEFAULT_FUNDS.map(f=>({ ...f, amount:0 })),
     kakei: defaultKakei(),
-    incomes: [],       // 確定分タブの入金予定（複数）
-    openIncomes: [],   // 途中経過タブの入金予定（仮・複数）
-    outgoes: [],       // 確定分タブのカード以外の出金予定（複数）
-    openOutgoes: [],   // 途中経過タブのカード以外の出金予定（仮・複数）
+    incomes: [],       // 入金予定（日付は任意）
+    outgoes: [],       // カード以外の出金予定（日付は任意）
+    groupDay: 11,      // この日から次の「支払いの回」に切り替える（10日の引落の翌日）
     updatedAt: null,
   };
 }
@@ -275,33 +284,28 @@ function withdrawDate(closeEnd, w){
   const y=closeEnd.getFullYear(), m=closeEnd.getMonth()+1;
   return new Date(y, m, Math.min(w, lastDayOf(y,m)));
 }
-function schedules(card, today){
-  const cc = closedCycle(today, card.closing);
-  const oc = openCycle(today, card.closing);
-  const conf = { ...cc, withdraw: withdrawDate(cc.end, card.withdraw) };
-  conf.paid = ymd(conf.withdraw) < ymd(today);           // 引落日を過ぎた
-  const open = { ...oc, withdraw: withdrawDate(oc.end, card.withdraw) };
-  open.total = daysBetween(oc.start, oc.end) + 1;
-  open.elapsed = Math.min(open.total, Math.max(1, daysBetween(oc.start, today) + 1));
-  open.predicted = card.open.amt || 0;   // 引落目安額＝入力した利用額そのもの
-  return { conf, open };
+// ---------- 支払いの回 ----------
+// 毎月「区切り日」〜翌月「区切り日の前日」に引き落とされる分を1回とする（初期値：11日〜翌月10日）
+const gDay = () => Math.min(28, Math.max(2, +(state && state.groupDay) || 11));
+const groupIndexOf = d => d.getFullYear()*12 + d.getMonth() - (d.getDate() >= gDay() ? 0 : 1);
+const groupRange = gi => { const y = Math.floor(gi/12), m = gi%12; return { start:new Date(y, m, gDay()), end:new Date(y, m+1, gDay()-1) }; };
+// その回でのカードの引落日と、対象の利用期間
+function cardInGroup(card, gi){
+  const y = Math.floor(gi/12), m = gi%12;
+  const wm = card.withdraw >= gDay() ? m : m + 1;
+  const wd = new Date(y, wm, Math.min(card.withdraw, lastDayOf(y, wm)));
+  const end = closingDate(wd.getFullYear(), wd.getMonth()-1, card.closing);
+  const prevEnd = closingDate(end.getFullYear(), end.getMonth()-1, card.closing);
+  const start = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), prevEnd.getDate()+1);
+  return { withdraw: wd, key: keyOf(wd), start, end };
 }
-
-// 締めをまたいだら「利用中」の金額を「確定分」へ自動で繰り越す
-function rollOver(today){
+// 終わった回（今回より前）の金額を消す
+function cleanupAmts(today){
+  const from = keyOf(groupRange(groupIndexOf(today)).start);
   let changed = false;
   state.cards.forEach(c=>{
-    const ccEnd = keyOf(closedCycle(today, c.closing).end);
-    const ocEnd = keyOf(openCycle(today, c.closing).end);
-    if (c.open.end && c.open.end !== ocEnd){
-      if (c.open.end === ccEnd && c.open.amt && !(c.conf.end === ccEnd && c.conf.amt)){
-        c.conf = { amt:c.open.amt, end:ccEnd, carried:true };
-      }
-      c.open = { amt:0, end:ocEnd, carried:false }; changed = true;
-    }
-    if (c.conf.end && c.conf.end !== ccEnd){ c.conf = { amt:0, end:ccEnd, carried:false }; changed = true; }
-    if (!c.open.end){ c.open.end = ocEnd; }
-    if (!c.conf.end){ c.conf.end = ccEnd; }
+    c.amts = c.amts || {};
+    Object.keys(c.amts).forEach(k=>{ if (k < from || !+c.amts[k]){ delete c.amts[k]; changed = true; } });
   });
   return changed;
 }
@@ -346,7 +350,7 @@ async function decryptJSON(payload, pass){
 const sb = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 let PASS = null, ROW_ID = null, state = null, saveTimer = null, syncMsg = "", syncErr = false;
-let VIEW = "conf";
+let VIEW = "g0";
 
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
@@ -386,7 +390,7 @@ function migrate(s){
   }
   s.funds = Array.isArray(s.funds) ? s.funds : base.funds;
   // 途中経過用の（仮）残高・入金予定。旧版の「入金予定」1欄は入金予定の行へ移す
-  s.funds.forEach(f=>{ f.openAmount = +f.openAmount || 0; });
+  if ((s.v||1) < 4) s.funds.forEach(f=>{ f.openAmount = +f.openAmount || 0; });
   if (+s.nextIncome){
     const inc = s.funds.find(f=>f.id==="income") || s.funds[s.funds.length-1];
     if (inc) inc.openAmount += +s.nextIncome;
@@ -394,9 +398,9 @@ function migrate(s){
   delete s.nextIncome;
   // 入金予定：残高の項目から切り出して、複数件のリストに
   s.incomes = Array.isArray(s.incomes) ? s.incomes : [];
-  s.openIncomes = Array.isArray(s.openIncomes) ? s.openIncomes : [];
+  if ((s.v||1) < 4) s.openIncomes = Array.isArray(s.openIncomes) ? s.openIncomes : [];
   s.outgoes = Array.isArray(s.outgoes) ? s.outgoes : [];
-  s.openOutgoes = Array.isArray(s.openOutgoes) ? s.openOutgoes : [];
+  if ((s.v||1) < 4) s.openOutgoes = Array.isArray(s.openOutgoes) ? s.openOutgoes : [];
   const incIdx = s.funds.findIndex(f=>f.id==="income");
   if (incIdx >= 0){
     const f = s.funds[incIdx];
@@ -409,7 +413,7 @@ function migrate(s){
   const rk = s.cards.find(c=>c.id==="rakuten");
   if (ich >= 0){
     const a = s.cards[ich];
-    if (rk){
+    if (rk && rk.conf && a.conf){
       rk.conf.amt = (+rk.conf.amt||0) + (+a.conf.amt||0);
       rk.open.amt = (+rk.open.amt||0) + (+a.open.amt||0);
     }
@@ -422,6 +426,23 @@ function migrate(s){
   s.cards.forEach(c=>{ delete c.marketOnly; });
   if (!s.kakei || !Array.isArray(s.kakei.cats)) s.kakei = defaultKakei();
   upgradeKakei(s.kakei);
+  // v4：確定分／途中経過 → 引落日ごとの金額（支払いの回）。（仮）の残高は廃止、（仮）の入出金予定は通常の予定へ移す
+  if ((s.v||1) < 4){
+    s.cards.forEach(c=>{
+      c.amts = c.amts || {};
+      [c.conf, c.open].forEach(x=>{
+        if (x && +x.amt && x.end){ const e = parseYMD(x.end); if (e){ const k = keyOf(withdrawDate(e, c.withdraw)); c.amts[k] = (+c.amts[k]||0) + (+x.amt); } }
+      });
+      delete c.conf; delete c.open;
+    });
+    s.funds.forEach(f=>{ delete f.openAmount; });
+    (s.openIncomes||[]).filter(x=>+x.amount).forEach(x=>s.incomes.push({ ...x, name:"（仮）" + (x.name||"") }));
+    (s.openOutgoes||[]).filter(x=>+x.amount).forEach(x=>s.outgoes.push({ ...x, name:"（仮）" + (x.name||"") }));
+    delete s.openIncomes; delete s.openOutgoes;
+    s.groupDay = s.groupDay || 11;
+    s.v = 4;
+  }
+  s.cards.forEach(c=>{ c.amts = c.amts || {}; });
   return s;
 }
 function scheduleSave(){
@@ -467,45 +488,39 @@ function buildTimeline(start, items){
 // 入出金予定：日付なし→最初から反映／日付あり→その日に反映（日付を過ぎたら「済み」で計算から外す）
 const parseYMD = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v||""); return m ? new Date(+m[1], +m[2]-1, +m[3]) : null; };
 const isPassed = (x, today) => { const d = parseYMD(x.date); return !!d && d < ymd(today); };
-function flowParts(incomes, outgoes, today){
-  const act = l => l;   // 自動では外さない（済んだら自分で×で消す）
-  const undated = l => act(l).filter(x=>!parseYMD(x.date)).reduce((a,x)=>a+(+x.amount||0),0);
-  const items = [
-    ...act(incomes).filter(x=>parseYMD(x.date) && +x.amount).map(x=>({ date:parseYMD(x.date), name:x.name||"入金予定", amount:-(+x.amount) })),
-    ...act(outgoes).filter(x=>parseYMD(x.date) && +x.amount).map(x=>({ date:parseYMD(x.date), name:x.name||"出金予定", amount:+x.amount })),
-  ];
-  const net = act(incomes).reduce((a,x)=>a+(+x.amount||0),0) - act(outgoes).reduce((a,x)=>a+(+x.amount||0),0);
-  return { undatedNet: undated(incomes) - undated(outgoes), items, net };
-}
+// 日付が来たかどうか：today＝当日 / past＝過ぎた / ""＝まだ
+const dueOf = (d, today) => !d ? "" : ymd(d).getTime() === ymd(today).getTime() ? "today" : ymd(d) < ymd(today) ? "past" : "";
+const GROUP_NAMES = ["今回", "次回", "その次"];
 function compute(){
-  const today = new Date();
-  const rows = state.cards.map(c=>({ card:c, sch: schedules(c, today) }));
-  const balConf = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
-  const fc = flowParts(state.incomes, state.outgoes, today);
-  const fundsTotal = balConf + fc.net;                       // 残高＋入金予定−出金予定
-
-  // 確定分（未引落のもの）
-  const confItems = rows.filter(r=>r.card.conf.amt)          // 引落日を過ぎても自動では外さない（済んだら0にする）
-    .map(r=>({ date:r.sch.conf.withdraw, name:shortName(r.card.name), amount:r.card.conf.amt }));
-  const confTotal = confItems.reduce((a,i)=>a+i.amount,0);
-  const confStart = balConf + fc.undatedNet;
-  const confTimeline = buildTimeline(confStart, confItems.concat(fc.items));
-  const afterConf = fundsTotal - confTotal;
-
-  // 途中経過（利用中）：確定分とは別に入れた（仮）の残高・入出金予定からスタート
-  const balOpen = state.funds.reduce((a,f)=>a+(+f.openAmount||0),0);
-  const fo = flowParts(state.openIncomes, state.openOutgoes, today);
-  const openStart = balOpen + fo.net;
-  const openItems = rows.filter(r=>r.sch.open.predicted)
-    .map(r=>({ date:r.sch.open.withdraw, name:shortName(r.card.name), amount:r.sch.open.predicted }));
-  const openCurrent = state.cards.reduce((a,c)=>a+(+c.open.amt||0),0);
-  const openPredicted = openItems.reduce((a,i)=>a+i.amount,0);
-  const openTlStart = balOpen + fo.undatedNet;
-  const openTimeline = buildTimeline(openTlStart, openItems.concat(fo.items));
-
-  return { today, fundsTotal, rows, confTotal, confStart, confTimeline, afterConf,
-           openStart, openTlStart, openCurrent, openPredicted, openTimeline,
-           openOutlook: openStart - openPredicted };
+  const today = new Date(), g0 = groupIndexOf(today);
+  const bal = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
+  const flows = [
+    ...state.incomes.map(x=>({ x, sign:-1, name:x.name||"入金予定" })),     // 入金は残高を増やす（amountをマイナスで持つ）
+    ...state.outgoes.map(x=>({ x, sign: 1, name:x.name||"出金予定" })),
+  ].filter(f=>+f.x.amount);
+  const undatedNet = flows.filter(f=>!parseYMD(f.x.date)).reduce((a,f)=>a - f.sign*(+f.x.amount),0);
+  const dated = flows.filter(f=>parseYMD(f.x.date)).map(f=>{
+    const d = parseYMD(f.x.date);
+    return { date:d, name:f.name, amount:f.sign*(+f.x.amount), gi: Math.max(g0, groupIndexOf(d)) };  // 今回より前の日付は今回に入れる
+  });
+  let start = bal + undatedNet;
+  const groups = [0,1,2].map(n=>{
+    const gi = g0 + n;
+    const cards = state.cards.map((c,i)=>({ card:c, idx:i, ...cardInGroup(c, gi), amt: +((c.amts||{})[keyOf(cardInGroup(c, gi).withdraw)]) || 0 }));
+    const cardItems = cards.filter(x=>x.amt).map(x=>({ date:x.withdraw, name:shortName(x.card.name), amount:x.amt }));
+    const flowItems = dated.filter(f=>f.gi === gi);
+    const items = cardItems.concat(flowItems);
+    const g = { n, gi, cards, start, tl: buildTimeline(start, items),
+      cardTotal: cardItems.reduce((a,i)=>a+i.amount,0),
+      flowNet: -flowItems.reduce((a,i)=>a+i.amount,0) };
+    g.end = start - items.reduce((a,i)=>a+i.amount,0);
+    const wds = cards.map(x=>x.withdraw).sort((a,b)=>a-b);
+    g.label = wds.length ? `${md(wds[0])}〜${md(wds[wds.length-1])}` : "";
+    start = g.end;
+    return g;
+  });
+  const beyond = dated.filter(f=>f.gi > g0 + 2).length;
+  return { today, g0, bal, undatedNet, groups, beyond };
 }
 /* ---------- 画面 ---------- */
 function renderLock(errMsg=""){
@@ -537,122 +552,104 @@ function renderLock(errMsg=""){
 }
 function afterLoad(){
   setSync(sb ? "同期済み" : "この端末に保存", false);
-  if (rollOver(new Date())) scheduleSave();
+  if (cleanupAmts(new Date())) scheduleSave();
   render();
 }
 
-function timelineHTML(startLabel, start, tl){
+function timelineHTML(startLabel, start, tl, firstCol="いま"){
   return `
     <div class="tl-row" style="padding-top:0">
-      <div class="tl-date">いま</div><div class="tl-cards">${startLabel}</div>
+      <div class="tl-date">${firstCol}</div><div class="tl-cards">${startLabel}</div>
       <div class="tl-amt"><div class="tl-bal num">${yen(start)}</div></div>
     </div>
     ${tl.length ? tl.map(g=>`
       <div class="tl-row${g.balance<0?" short":""}">
-        <div class="tl-date num">${md(g.date)}</div>
+        <div class="tl-date num">${md(g.date)}${dueOf(g.date, new Date()) ? `<div class="tl-due">${dueOf(g.date, new Date())==="today"?"今日":"済？"}</div>` : ""}</div>
         <div class="tl-cards">${g.names.map(esc).join("・")}<br><span class="num">${g.sum >= 0 ? "−" + yen(g.sum) : "＋" + yen(-g.sum)}</span></div>
         <div class="tl-amt"><div class="tl-bal num ${g.balance<0?"neg":""}">${yen(g.balance)}</div></div>
       </div>`).join("") : `<div class="hint">金額が入っていません。</div>`}
     ${tl.some(g=>g.balance<0) ? `<div class="note">赤い日に残高が足りなくなる見込みです。</div>`:""}`;
 }
 
-// 入金予定・出金予定のリスト（conf / open / out-conf / out-open）
-const incList = mode => ({ conf:state.incomes, open:state.openIncomes, "out-conf":state.outgoes, "out-open":state.openOutgoes })[mode];
+// 入金予定・出金予定のリスト
+const incList = mode => ({ conf:state.incomes, "out-conf":state.outgoes })[mode];
 function flowRowHTML(x, i, list, ph){
-  const passed = isPassed(x, new Date());
+  const due = dueOf(parseYMD(x.date), new Date());
   return `
-    <div class="inc-row dated">
+    <div class="inc-row dated${due?" due":""}">
       <input type="date" class="fdate" data-idate="${i}" data-list="${list}" value="${esc(x.date||"")}" title="日付（任意）">
       <input type="text" class="memo" data-iname="${i}" data-list="${list}" value="${esc(x.name)}" placeholder="${ph}">
       <input class="money" inputmode="numeric" data-inc="${i}" data-list="${list}" value="${fmtInput(x.amount)}" placeholder="0">
       <button class="x" data-idel="${i}" data-list="${list}" title="削除">×</button>
-      ${passed ? `<span class="passed-tag">日付を過ぎています（済んでいたら×で消してください）</span>` : ""}
+      ${due ? `<span class="passed-tag">${due==="today"?"● 今日が予定日です":"● 日付を過ぎています"}（済んだら残高を入れ直して×で消す）</span>` : ""}
     </div>`;
 }
-function fundsHTML(mode){
-  const isOpen = mode === "open";
-  const list = incList(mode), outs = incList("out-" + mode);
+function fundsHTML(){
+  const list = state.incomes, outs = state.outgoes;
   return `
-    <section>
-      <h2>${isOpen ? "残高・入出金予定（仮）" : "残高・入出金予定（いま）"}</h2>
+    <section id="funds">
+      <h2>残高・入出金予定（いま）</h2>
       <div class="inc-head" style="margin-top:0">残高</div>
-      ${isOpen ? `<div class="hint" style="margin:0 0 6px">次回の引落時点の見込みを入れてください。確定分タブの金額とは別に保存します。</div>` : ""}
       ${state.funds.map((f,i)=>`
         <div class="row">
-          <div class="name"><div class="n">${esc(f.name)}${isOpen?"（仮）":""}</div></div>
-          <input class="money" inputmode="numeric" ${isOpen?`data-ofund="${i}"`:`data-fund="${i}"`} value="${fmtInput(isOpen ? f.openAmount : f.amount)}" placeholder="0">
+          <div class="name"><div class="n">${esc(f.name)}</div></div>
+          <input class="money" inputmode="numeric" data-fund="${i}" value="${fmtInput(f.amount)}" placeholder="0">
         </div>`).join("")}
-      <div class="inc-head">入金予定${isOpen?"（仮）":""}</div>
-      ${list.map((x,i)=>flowRowHTML(x, i, mode, "メモ")).join("")}
-      <button class="btn ghost small" data-iadd="${mode}" style="margin-top:6px">＋ 入金予定を追加</button>
+      <div class="inc-head">入金予定</div>
+      ${list.map((x,i)=>flowRowHTML(x, i, "conf", "メモ")).join("")}
+      <button class="btn ghost small" data-iadd="conf" style="margin-top:6px">＋ 入金予定を追加</button>
       ${list.length ? `<div class="hint">入金予定の合計：${yen(list.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
-      <div class="inc-head">出金予定（カード以外）${isOpen?"（仮）":""}</div>
-      ${outs.map((x,i)=>flowRowHTML(x, i, "out-" + mode, "メモ")).join("")}
-      <button class="btn ghost small" data-iadd="out-${mode}" style="margin-top:6px">＋ 出金予定を追加</button>
+      <div class="inc-head">出金予定（カード以外）</div>
+      ${outs.map((x,i)=>flowRowHTML(x, i, "out-conf", "メモ")).join("")}
+      <button class="btn ghost small" data-iadd="out-conf" style="margin-top:6px">＋ 出金予定を追加</button>
       ${outs.length ? `<div class="hint">出金予定の合計：${yen(outs.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
-      <div class="hint">資金合計${isOpen?"（仮）":""} ＝ 残高 ＋ 入金予定 − 出金予定。入れた予定は×で消すまで計算に入ります。日付を入れると「引落の流れ」でその日の位置に並びます（日付なしは最初に反映）。</div>
+      <div class="hint">日付なしの予定は「今回」の最初に反映します。日付を入れた予定は、その日を含む回の流れに入ります（今回・次回・その次）。入れた予定は×で消すまで計算に入ります。</div>
     </section>`;
 }
-
-function confViewHTML(r){
-  const cls = r.afterConf < 0 ? "neg" : "pos";
-  return `
-    <section class="hero">
-      <div class="label">確定分をすべて払った後の残高</div>
-      <div class="big num ${cls}">${yen(r.afterConf)}</div>
-      <div class="stats">
-        <div class="stat"><div class="k">資金合計</div><div class="v num">${yen(r.fundsTotal)}</div></div>
-        <div class="stat"><div class="k">確定分の引落合計（未引落）</div><div class="v num">${yen(r.confTotal)}</div></div>
-      </div>
-    </section>
-    <section><h2>引落の流れ（確定分）</h2>${timelineHTML("残高＋日付なしの入出金", r.confStart, r.confTimeline)}</section>
-    ${fundsHTML("conf")}
-    <section>
-      <h2>確定分の請求額（明細の確定額を入力）</h2>
-      ${r.rows.map(({card:c,sch:s},i)=>`
-        <div class="row">
-          <div class="name">
-            <div class="n">${esc(c.name)}${s.conf.paid && c.conf.amt ? `<span class="badge carry">引落日を過ぎています</span>` : ""}${c.conf.carried && !s.conf.paid ? `<span class="badge carry">途中入力から繰越</span>` : ""}</div>
-            <div class="meta num">${md(s.conf.start)}〜${md(s.conf.end)}締め → <b>${md(s.conf.withdraw)}引落</b></div>
-          </div>
-          <input class="money" inputmode="numeric" data-conf="${i}" value="${fmtInput(c.conf.amt)}" placeholder="0">
-        </div>`).join("")}
-      <div class="hint">「途中入力から繰越」は、締め前に途中経過タブで入れた額が自動で移ったものです。明細の確定額で上書きしてください。引落日を過ぎても自動では外さないので、引落が済んだら残高を入れ直し、そのカードを0にしてください。</div>
-    </section>`;
+function cardStatus(x, today){
+  const t = ymd(today);
+  if (t > x.end) return { cls:"closed", text:`${md(x.start)}〜${md(x.end)}利用・締め済み（明細の額）` };
+  if (t >= x.start){
+    const total = daysBetween(x.start, x.end) + 1, el = daysBetween(x.start, t) + 1;
+    return { cls:"open", text:`${md(x.start)}〜${md(x.end)}利用中（${el}/${total}日目・見込み）` };
+  }
+  return { cls:"before", text:`${md(x.start)}〜${md(x.end)}利用（まだ始まっていません）` };
 }
-
-function openViewHTML(r){
-  const cls = r.openOutlook < 0 ? "neg" : "pos";
+function groupViewHTML(r, n){
+  const g = r.groups[n], name = GROUP_NAMES[n];
+  const cls = g.end < 0 ? "neg" : "pos";
+  const startLabel = n === 0 ? "残高＋日付なしの入出金" : `${GROUP_NAMES[n-1]}の支払い後の残高`;
+  const dueCards = g.cards.filter(x=>x.amt && dueOf(x.withdraw, r.today)).map(x=>`${esc(shortName(x.card.name))} ${yen(x.amt)}`);
+  const dueFlows = n === 0 ? [...state.incomes.map(x=>({...x,k:"入金"})), ...state.outgoes.map(x=>({...x,k:"出金"}))]
+    .filter(x=>+x.amount && dueOf(parseYMD(x.date), r.today)).map(x=>`${x.k}：${esc(x.name||"予定")} ${yen(+x.amount)}`) : [];
+  const dues = dueCards.concat(dueFlows);
   return `
     <section class="hero">
-      <div class="label">次回の引落後の見込み収支（＝あと使える額）</div>
-      <div class="big num ${cls}">${yen(r.openOutlook)}</div>
+      <div class="label">${name}の支払い後の残高（${g.label}の引落）</div>
+      <div class="big num ${cls}">${yen(g.end)}</div>
       <div class="stats">
-        <div class="stat"><div class="k">資金合計（仮）</div><div class="v num">${yen(r.openStart)}</div></div>
-        <div class="stat"><div class="k">引落目安額の合計</div><div class="v num">${yen(r.openPredicted)}</div></div>
+        <div class="stat"><div class="k">${n===0?"スタート（残高＋日付なしの入出金）":"スタート（"+GROUP_NAMES[n-1]+"の支払い後）"}</div><div class="v num">${yen(g.start)}</div></div>
+        <div class="stat"><div class="k">この回のカード引落</div><div class="v num">${yen(g.cardTotal)}</div></div>
+        ${g.flowNet ? `<div class="stat total"><div class="k">この回の入出金予定（差し引き）</div><div class="v num">${g.flowNet>0?"＋":""}${yen(g.flowNet)}</div></div>` : ""}
       </div>
-      <div class="hint">資金合計（仮）＝下の「残高・入出金予定（仮）」の残高＋入金予定−出金予定。確定分タブの残高は引き継ぎません。<br>見込み収支＝資金合計（仮） − 引落目安額の合計（＝今入力している利用額の合計）。</div>
     </section>
-
-
+    ${dues.length ? `<div class="alert amber" style="margin:0 0 12px"><b>日付が来た引落・入出金（${dues.length}件）</b><br>${dues.join("　")}<br><span style="font-size:12px">済んだら、残高を入れ直して、カードは0に・予定は×で消してください。</span></div>` : ""}
+    <section><h2>${name}の流れ</h2>${timelineHTML(startLabel, g.start, g.tl, n===0?"いま":"開始")}</section>
     <section>
-      <h2>引落の流れ（途中経過）</h2>
-      ${timelineHTML("残高（仮）＋日付なしの入出金", r.openTlStart, r.openTimeline)}
-    </section>
-
-    ${fundsHTML("open")}
-
-    <section>
-      <h2>引落目安額（今の利用額をアプリの明細を見て入力）</h2>
-      ${r.rows.map(({card:c,sch:s},i)=>`
-        <div class="row">
+      <h2>${name}のカード引落（${g.label}）</h2>
+      ${g.cards.map(x=>{ const st = cardStatus(x, r.today); const due = x.amt ? dueOf(x.withdraw, r.today) : ""; return `
+        <div class="row${due?" due":""}">
           <div class="name">
-            <div class="n">${esc(c.name)}</div>
-            <div class="meta num">利用中：${md(s.open.start)}〜${md(s.open.end)}（${s.open.elapsed}/${s.open.total}日目）→ <b>${md(s.open.withdraw)}引落</b></div>
+            <div class="n">${esc(x.card.name)}${due ? `<span class="badge due">${due==="today"?"● 今日が引落日":"● 引落日を過ぎています"}</span>` : ""}<span class="badge st-${st.cls}">${st.cls==="closed"?"締め済み":st.cls==="open"?"利用中":"利用前"}</span></div>
+            ${due ? `<div class="due-msg">引落が済んだら、残高を入れ直してここを0にしてください</div>` : ""}
+            <div class="meta num"><b>${md(x.withdraw)}引落</b>・${st.text}</div>
           </div>
-          <input class="money" inputmode="numeric" data-open="${i}" value="${fmtInput(c.open.amt)}" placeholder="0">
-        </div>`).join("")}
-    </section>`;
+          <input class="money" inputmode="numeric" data-amt="${x.idx}|${x.key}" value="${fmtInput(x.amt)}" placeholder="0">
+        </div>`; }).join("")}
+      <div class="hint">締め済みは明細の確定額、利用中は今の利用額（見込み）を入れてください。毎月${gDay()}日になると、次回が今回に繰り上がり、入れた額もそのまま移ります。</div>
+    </section>
+    ${n === 0 ? fundsHTML() : `<section><div class="hint" style="margin:0">残高・入出金予定は「今回」タブで入力します。日付を入れた予定は、その日を含む回の流れに入ります。<button class="btn ghost small" data-view="g0" style="margin-top:8px">今回タブで入力する</button></div></section>`}
+    ${n === 2 && r.beyond ? `<div class="hint">その次より先の日付の入出金予定が${r.beyond}件あります（回が進むと表示されます）。</div>` : ""}`;
 }
 
 // 「いつ払い？」：購入日ごとの引落日
@@ -683,16 +680,16 @@ function simHTML(r){
     <section>
       <h2>カード別（引落が遅い順）</h2>
       ${list.map(x=>{
-        const inCurrent = keyOf(x.closeEnd) === keyOf(openCycle(r.today, x.card.closing).end);
+        const gn = groupIndexOf(x.withdraw) - r.g0;
         let out = "";
         if (SIM_AMT){
-          out = inCurrent
-            ? `<div class="sim-out num">買った後の見込み収支（途中経過）：<b class="${r.openOutlook-SIM_AMT<0?"neg":""}">${yen(r.openOutlook - SIM_AMT)}</b></div>`
-            : `<div class="sim-out sub sim-sub">今集計している期間より後の引落です（途中経過には含まれません）</div>`;
+          out = (gn >= 0 && gn <= 2)
+            ? `<div class="sim-out num">${GROUP_NAMES[gn]}の支払い後の残高：${yen(r.groups[gn].end)} → <b class="${r.groups[gn].end-SIM_AMT<0?"neg":""}">${yen(r.groups[gn].end - SIM_AMT)}</b></div>`
+            : `<div class="sim-out sub sim-sub">「その次」より先の回の引落です</div>`;
         }
         return `
         <div class="sim-card">
-          <div class="sim-head"><div class="n">${esc(x.card.name)}</div><div class="w num">${md(x.withdraw)}引落</div></div>
+          <div class="sim-head"><div class="n">${esc(x.card.name)}</div><div class="w num">${md(x.withdraw)}引落${(()=>{ const gn = groupIndexOf(x.withdraw) - r.g0; return gn>=0&&gn<=2 ? `<span class="sim-sub">（${GROUP_NAMES[gn]}）</span>` : ""; })()}</div></div>
           <div class="sim-sub num">${md(pd)}購入 → ${md(x.closeEnd)}締め → ${md(x.withdraw)}引落（${x.days}日後）</div>
           <div class="sim-tip num">あと${x.wait}日待って <b>${md(x.nextStart)}</b> 以降に買えば → <b>${md(x.nextWd)}引落</b>（${daysBetween(x.withdraw, x.nextWd)}日先送り）</div>
           ${x.card.marketClosing ? (()=>{ const m = purchaseInfo({ closing:x.card.marketClosing, withdraw:x.card.withdraw }, pd);
@@ -715,13 +712,12 @@ function render(){
   <div class="wrap">
     ${headerHTML()}
 
-    <div class="tabs">
-      <button data-view="conf" class="${VIEW==="conf"?"on":""}">確定分<small>今月の引落</small></button>
-      <button data-view="open" class="${VIEW==="open"?"on":""}">途中経過<small>来月の引落</small></button>
+    <div class="tabs four">
+      ${[0,1,2].map(n=>`<button data-view="g${n}" class="${VIEW==="g"+n?"on":""}">${GROUP_NAMES[n]}<small class="num">${r.groups[n].label}</small></button>`).join("")}
       <button data-view="sim" class="${VIEW==="sim"?"on":""}">いつ払い？<small>買う日で確認</small></button>
     </div>
 
-    ${VIEW==="conf" ? confViewHTML(r) : VIEW==="open" ? openViewHTML(r) : simHTML(r)}
+    ${VIEW==="sim" ? simHTML(r) : groupViewHTML(r, +VIEW.slice(1) || 0)}
 
     <section>
       <h2>締め日・引落日一覧</h2>
@@ -746,6 +742,11 @@ function render(){
             <button class="x" data-cdel="${i}" title="削除">×</button>
           </div>`).join("")}
         <button class="btn ghost small" id="add-card">＋ カードを追加</button>
+
+        <div class="gap"></div><div class="gap"></div>
+        <h2>支払いの回の区切り</h2>
+        <div class="edit-row fund"><span style="font-size:14px">毎月 <input type="number" min="2" max="28" value="${gDay()}" id="group-day" style="width:64px"> 日から次の回に切り替え</span><span></span></div>
+        <div class="hint">初期値は11日（10日の引落が終わった翌日）。毎月この日〜翌月その前日の引落を1回分として扱います。</div>
 
         <div class="gap"></div><div class="gap"></div>
         <h2>残高の項目（口座・現金など）</h2>
@@ -791,7 +792,7 @@ function bind(){
     incList(el.dataset.list)[+el.dataset.idate].date = el.value || ""; scheduleSave(); render();
   }));
   app.querySelectorAll("[data-iname]").forEach(el=>el.addEventListener("change", ()=>{
-    incList(el.dataset.list)[+el.dataset.iname].name = el.value.trim(); scheduleSave();
+    incList(el.dataset.list)[+el.dataset.iname].name = el.value.trim(); scheduleSave(); render();
   }));
   const sd = document.getElementById("sim-date");
   if (sd) sd.addEventListener("change", ()=>{ SIM_DATE = parseDateInput(sd.value); render(); });
@@ -806,15 +807,11 @@ function bind(){
     const commit = ()=>{
       const v = parseYen(el.value);
       if (el.dataset.fund !== undefined) state.funds[+el.dataset.fund].amount = v;
-      if (el.dataset.conf !== undefined){
-        const c = state.cards[+el.dataset.conf];
-        c.conf = { amt:v, end:keyOf(closedCycle(today, c.closing).end), carried:false };
+      if (el.dataset.amt !== undefined){
+        const [i, key] = el.dataset.amt.split("|"); const c = state.cards[+i];
+        c.amts = c.amts || {};
+        if (v) c.amts[key] = v; else delete c.amts[key];
       }
-      if (el.dataset.open !== undefined){
-        const c = state.cards[+el.dataset.open];
-        c.open = { amt:v, end:keyOf(openCycle(today, c.closing).end), carried:false };
-      }
-      if (el.dataset.ofund !== undefined) state.funds[+el.dataset.ofund].openAmount = v;
       if (el.dataset.inc !== undefined) incList(el.dataset.list)[+el.dataset.inc].amount = v;
       scheduleSave(); render();
     };
@@ -822,12 +819,13 @@ function bind(){
     el.addEventListener("keydown", e=>{ if (e.key==="Enter") el.blur(); });
   });
   const onEdit = (sel, fn)=>app.querySelectorAll(sel).forEach(el=>el.addEventListener("change", ()=>{
-    fn(el); rollOver(new Date()); scheduleSave(); render();
+    fn(el); scheduleSave(); render();
   }));
   onEdit("[data-cname]", el=>state.cards[+el.dataset.cname].name = el.value.trim() || "カード");
   onEdit("[data-cclose]", el=>state.cards[+el.dataset.cclose].closing = Math.min(31, Math.max(0, parseInt(el.value,10)||0)));
   onEdit("[data-cwd]", el=>state.cards[+el.dataset.cwd].withdraw = Math.min(31, Math.max(1, parseInt(el.value,10)||1)));
   onEdit("[data-fname]", el=>state.funds[+el.dataset.fname].name = el.value.trim() || "項目");
+  onEdit("#group-day", el=>{ state.groupDay = Math.min(28, Math.max(2, parseInt(el.value,10)||11)); });
   app.querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{
     const c = state.cards[+b.dataset.cdel];
     if (confirm(`「${c.name}」を削除しますか？`)){ state.cards.splice(+b.dataset.cdel,1); scheduleSave(); render(); }
@@ -837,15 +835,15 @@ function bind(){
     if (confirm(`「${f.name}」を削除しますか？`)){ state.funds.splice(+b.dataset.fdel,1); scheduleSave(); render(); }
   });
   document.getElementById("add-card").onclick = ()=>{
-    state.cards.push({ id:"c"+Date.now(), name:"新しいカード", closing:0, withdraw:27, conf:emptyAmt(), open:emptyAmt() });
-    rollOver(new Date()); scheduleSave(); render();
+    state.cards.push({ id:"c"+Date.now(), name:"新しいカード", closing:0, withdraw:27, amts:{} });
+    scheduleSave(); render();
   };
   document.getElementById("add-fund").onclick = ()=>{
-    state.funds.push({ id:"f"+Date.now(), name:"新しい項目", amount:0, openAmount:0 }); scheduleSave(); render();
+    state.funds.push({ id:"f"+Date.now(), name:"新しい項目", amount:0 }); scheduleSave(); render();
   };
   document.getElementById("reset-cards").onclick = ()=>{
-    if (confirm("カードの確定分・利用中の金額をすべて0に戻しますか？（残高はそのまま）")){
-      state.cards.forEach(c=>{ c.conf.amt=0; c.conf.carried=false; c.open.amt=0; });
+    if (confirm("カードの金額（今回・次回・その次）をすべて0に戻しますか？（残高はそのまま）")){
+      state.cards.forEach(c=>{ c.amts = {}; });
       scheduleSave(); render();
     }
   };
@@ -1456,7 +1454,7 @@ function headerHTML(){
       <button data-mode="kakei" class="${isKakeiView()?"on":""}">家計</button>
     </div>`;
 }
-let LAST_PAY_VIEW = "conf", LAST_KAKEI_VIEW = "kakei";
+let LAST_PAY_VIEW = "g0", LAST_KAKEI_VIEW = "kakei";
 function bindCommon(){
   const app = document.getElementById("app");
   app.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{
@@ -1568,7 +1566,7 @@ function bindKakei(){
 }
 
 /* ---------- 起動 ---------- */
-VIEW = ["conf","open","sim","kakei","points"].includes(lsGet(LS_VIEW)) ? lsGet(LS_VIEW) : "conf";
+VIEW = ({ conf:"g0", open:"g1" })[lsGet(LS_VIEW)] || (["g0","g1","g2","sim","kakei","points"].includes(lsGet(LS_VIEW)) ? lsGet(LS_VIEW) : "g0");
 (async ()=>{
   const saved = lsGet(LS_PASS);
   if (saved){
@@ -1589,7 +1587,7 @@ document.addEventListener("visibilitychange", async ()=>{
         state = fresh; setSync("最新を取り込みました", false);
       }
     }
-    if (rollOver(new Date())) scheduleSave();
+    if (cleanupAmts(new Date())) scheduleSave();
     if (isKakeiView() && sb && MONTHS[KYM]) await loadMonth(KYM, true);
     render();
   }catch(e){}
