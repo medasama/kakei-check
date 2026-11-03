@@ -490,7 +490,7 @@ const parseYMD = v => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v||""); retur
 const isPassed = (x, today) => { const d = parseYMD(x.date); return !!d && d < ymd(today); };
 // 日付が来たかどうか：today＝当日 / past＝過ぎた / ""＝まだ
 const dueOf = (d, today) => !d ? "" : ymd(d).getTime() === ymd(today).getTime() ? "today" : ymd(d) < ymd(today) ? "past" : "";
-const GROUP_NAMES = ["今回", "次回", "その次"];
+const GROUP_NAMES = ["今回", "次回", "次々回"];
 function compute(){
   const today = new Date(), g0 = groupIndexOf(today);
   const bal = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
@@ -603,7 +603,7 @@ function fundsHTML(){
       ${outs.map((x,i)=>flowRowHTML(x, i, "out-conf", "メモ")).join("")}
       <button class="btn ghost small" data-iadd="out-conf" style="margin-top:6px">＋ 出金予定を追加</button>
       ${outs.length ? `<div class="hint">出金予定の合計：${yen(outs.reduce((a,x)=>a+(+x.amount||0),0))}</div>` : ""}
-      <div class="hint">日付なしの予定は「今回」の最初に反映します。日付を入れた予定は、その日を含む回の流れに入ります（今回・次回・その次）。入れた予定は×で消すまで計算に入ります。</div>
+      <div class="hint">日付なしの予定は「今回」の最初に反映します。日付を入れた予定は、その日を含む回の流れに入ります（今回・次回・次々回）。入れた予定は×で消すまで計算に入ります。</div>
     </section>`;
 }
 function cardStatus(x, today){
@@ -649,7 +649,7 @@ function groupViewHTML(r, n){
       <div class="hint">締め済みは明細の確定額、利用中は今の利用額（見込み）を入れてください。毎月${gDay()}日になると、次回が今回に繰り上がり、入れた額もそのまま移ります。</div>
     </section>
     ${n === 0 ? fundsHTML() : `<section><div class="hint" style="margin:0">残高・入出金予定は「今回」タブで入力します。日付を入れた予定は、その日を含む回の流れに入ります。<button class="btn ghost small" data-view="g0" style="margin-top:8px">今回タブで入力する</button></div></section>`}
-    ${n === 2 && r.beyond ? `<div class="hint">その次より先の日付の入出金予定が${r.beyond}件あります（回が進むと表示されます）。</div>` : ""}`;
+    ${n === 2 && r.beyond ? `<div class="hint">次々回より先の日付の入出金予定が${r.beyond}件あります（回が進むと表示されます）。</div>` : ""}`;
 }
 
 // 「いつ払い？」：購入日ごとの引落日
@@ -685,7 +685,7 @@ function simHTML(r){
         if (SIM_AMT){
           out = (gn >= 0 && gn <= 2)
             ? `<div class="sim-out num">${GROUP_NAMES[gn]}の支払い後の残高：${yen(r.groups[gn].end)} → <b class="${r.groups[gn].end-SIM_AMT<0?"neg":""}">${yen(r.groups[gn].end - SIM_AMT)}</b></div>`
-            : `<div class="sim-out sub sim-sub">「その次」より先の回の引落です</div>`;
+            : `<div class="sim-out sub sim-sub">「次々回」より先の回の引落です</div>`;
         }
         return `
         <div class="sim-card">
@@ -842,7 +842,7 @@ function bind(){
     state.funds.push({ id:"f"+Date.now(), name:"新しい項目", amount:0 }); scheduleSave(); render();
   };
   document.getElementById("reset-cards").onclick = ()=>{
-    if (confirm("カードの金額（今回・次回・その次）をすべて0に戻しますか？（残高はそのまま）")){
+    if (confirm("カードの金額（今回・次回・次々回）をすべて0に戻しますか？（残高はそのまま）")){
       state.cards.forEach(c=>{ c.amts = {}; });
       scheduleSave(); render();
     }
