@@ -199,6 +199,12 @@
   .row.due{background:var(--amber-soft);margin:0 -14px;padding:8px 14px}
   .badge.due{background:var(--amber);color:#fff}
   .due-msg{font-size:11.5px;color:var(--amber);margin-top:2px}
+  .done-btn{padding:4px 10px;font-size:12px;margin-left:4px;vertical-align:middle}
+  .tl-bank{font-size:11.5px;color:var(--sub);text-align:right}
+  .tl-bank.neg{color:var(--warn);font-weight:700}
+  .tl-row.bankshort{background:var(--amber-soft);margin:0 -14px;padding:9px 14px}
+  .edit-row.fund3{display:grid;grid-template-columns:1fr auto 30px;gap:6px;align-items:center;margin:6px 0}
+  .chk{display:flex;gap:4px;align-items:center;font-size:12.5px;color:var(--sub);white-space:nowrap}
   .tl-due{font-size:10.5px;color:var(--amber);font-weight:700}
   .startline{display:flex;justify-content:space-between;font-size:13px;color:var(--sub);padding:4px 0 8px}
 </style>
@@ -491,9 +497,13 @@ const isPassed = (x, today) => { const d = parseYMD(x.date); return !!d && d < y
 // 日付が来たかどうか：today＝当日 / past＝過ぎた / ""＝まだ
 const dueOf = (d, today) => !d ? "" : ymd(d).getTime() === ymd(today).getTime() ? "today" : ymd(d) < ymd(today) ? "past" : "";
 const GROUP_NAMES = ["今回", "次回", "次々回"];
+// 引落に使える口座かどうか（設定で切り替え。初期値は現金・株売却以外）
+const isBank = f => f.bank !== undefined ? !!f.bank : !(["cash","stock"].includes(f.id) || /現金|株/.test(f.name||""));
 function compute(){
   const today = new Date(), g0 = groupIndexOf(today);
   const bal = state.funds.reduce((a,f)=>a+(+f.amount||0),0);
+  const bankBal = state.funds.filter(isBank).reduce((a,f)=>a+(+f.amount||0),0);   // 引落に使える口座だけの残高
+  const showBank = state.funds.some(f=>!isBank(f) && +f.amount);                  // 口座以外（現金など）に金額があるときだけ口座の推移を出す
   const flows = [
     ...state.incomes.map(x=>({ x, sign:-1, name:x.name||"入金予定" })),     // 入金は残高を増やす（amountをマイナスで持つ）
     ...state.outgoes.map(x=>({ x, sign: 1, name:x.name||"出金予定" })),
@@ -503,7 +513,7 @@ function compute(){
     const d = parseYMD(f.x.date);
     return { date:d, name:f.name, amount:f.sign*(+f.x.amount), gi: Math.max(g0, groupIndexOf(d)) };  // 今回より前の日付は今回に入れる
   });
-  let start = bal + undatedNet;
+  let start = bal + undatedNet, bankStart = bankBal + undatedNet;   // 入出金予定は口座に入る・口座から出る扱い
   const groups = [0,1,2].map(n=>{
     const gi = g0 + n;
     const cards = state.cards.map((c,i)=>({ card:c, idx:i, ...cardInGroup(c, gi), amt: +((c.amts||{})[keyOf(cardInGroup(c, gi).withdraw)]) || 0 }));
@@ -514,13 +524,22 @@ function compute(){
       cardTotal: cardItems.reduce((a,i)=>a+i.amount,0),
       flowNet: -flowItems.reduce((a,i)=>a+i.amount,0) };
     g.end = start - items.reduce((a,i)=>a+i.amount,0);
+    // 口座だけの推移と、足りなくなる日・必要な入金額
+    const tlBank = buildTimeline(bankStart, items);
+    g.tl.forEach((t,i)=>{ t.bank = tlBank[i].balance; });
+    g.bankStart = bankStart; g.bankEnd = bankStart - items.reduce((a,i)=>a+i.amount,0);
+    const lows = [{ date:null, bank:bankStart }, ...g.tl.map(t=>({ date:t.date, bank:t.bank }))];
+    const minLow = lows.reduce((a,x)=>x.bank < a.bank ? x : a, lows[0]);
+    const firstNeg = lows.find(x=>x.bank < 0);
+    g.bankShort = minLow.bank < 0 ? { first:firstNeg.date, need:-minLow.bank } : null;
+    bankStart = g.bankEnd;
     const wds = cards.map(x=>x.withdraw).sort((a,b)=>a-b);
     g.label = wds.length ? `${md(wds[0])}〜${md(wds[wds.length-1])}` : "";
     start = g.end;
     return g;
   });
   const beyond = dated.filter(f=>f.gi > g0 + 2).length;
-  return { today, g0, bal, undatedNet, groups, beyond };
+  return { today, g0, bal, bankBal, showBank, undatedNet, groups, beyond };
 }
 /* ---------- 画面 ---------- */
 function renderLock(errMsg=""){
@@ -556,17 +575,18 @@ function afterLoad(){
   render();
 }
 
-function timelineHTML(startLabel, start, tl, firstCol="いま"){
+function timelineHTML(startLabel, start, tl, firstCol="いま", bankStart=null){
+  const bankLine = b => b === null || b === undefined ? "" : `<div class="tl-bank num ${b<0?"neg":""}">口座 ${yen(b)}${b<0?"（不足）":""}</div>`;
   return `
     <div class="tl-row" style="padding-top:0">
       <div class="tl-date">${firstCol}</div><div class="tl-cards">${startLabel}</div>
-      <div class="tl-amt"><div class="tl-bal num">${yen(start)}</div></div>
+      <div class="tl-amt"><div class="tl-bal num">${yen(start)}</div>${bankLine(bankStart)}</div>
     </div>
     ${tl.length ? tl.map(g=>`
-      <div class="tl-row${g.balance<0?" short":""}">
+      <div class="tl-row${g.balance<0?" short":(bankStart!==null && g.bank<0)?" bankshort":""}">
         <div class="tl-date num">${md(g.date)}${dueOf(g.date, new Date()) ? `<div class="tl-due">${dueOf(g.date, new Date())==="today"?"今日":"済？"}</div>` : ""}</div>
         <div class="tl-cards">${g.names.map(esc).join("・")}<br><span class="num">${g.sum >= 0 ? "−" + yen(g.sum) : "＋" + yen(-g.sum)}</span></div>
-        <div class="tl-amt"><div class="tl-bal num ${g.balance<0?"neg":""}">${yen(g.balance)}</div></div>
+        <div class="tl-amt"><div class="tl-bal num ${g.balance<0?"neg":""}">${yen(g.balance)}</div>${bankStart!==null ? bankLine(g.bank) : ""}</div>
       </div>`).join("") : `<div class="hint">金額が入っていません。</div>`}
     ${tl.some(g=>g.balance<0) ? `<div class="note">赤い日に残高が足りなくなる見込みです。</div>`:""}`;
 }
@@ -581,7 +601,8 @@ function flowRowHTML(x, i, list, ph){
       <input type="text" class="memo" data-iname="${i}" data-list="${list}" value="${esc(x.name)}" placeholder="${ph}">
       <input class="money" inputmode="numeric" data-inc="${i}" data-list="${list}" value="${fmtInput(x.amount)}" placeholder="0">
       <button class="x" data-idel="${i}" data-list="${list}" title="削除">×</button>
-      ${due ? `<span class="passed-tag">${due==="today"?"● 今日が予定日です":"● 日付を過ぎています"}（済んだら残高を入れ直して×で消す）</span>` : ""}
+      ${due ? `<span class="passed-tag">${due==="today"?"● 今日が予定日です":"● 日付を過ぎています"}
+        <button class="btn small done-btn" data-flowdone="${list}|${i}">済み（消す）</button></span>` : ""}
     </div>`;
 }
 function fundsHTML(){
@@ -592,9 +613,10 @@ function fundsHTML(){
       <div class="inc-head" style="margin-top:0">残高</div>
       ${state.funds.map((f,i)=>`
         <div class="row">
-          <div class="name"><div class="n">${esc(f.name)}</div></div>
+          <div class="name"><div class="n">${esc(f.name)}<span class="badge ${isBank(f)?"st-closed":"st-before"}">${isBank(f)?"口座":"口座以外"}</span></div></div>
           <input class="money" inputmode="numeric" data-fund="${i}" value="${fmtInput(f.amount)}" placeholder="0">
         </div>`).join("")}
+      <div class="hint num">口座の合計 ${yen(state.funds.filter(isBank).reduce((a,f)=>a+(+f.amount||0),0))}／口座以外（現金など） ${yen(state.funds.filter(f=>!isBank(f)).reduce((a,f)=>a+(+f.amount||0),0))}<br>「口座」かどうかは、下の設定の「残高の項目」で切り替えられます。</div>
       <div class="inc-head">入金予定</div>
       ${list.map((x,i)=>flowRowHTML(x, i, "conf", "メモ")).join("")}
       <button class="btn ghost small" data-iadd="conf" style="margin-top:6px">＋ 入金予定を追加</button>
@@ -630,18 +652,22 @@ function groupViewHTML(r, n){
       <div class="stats">
         <div class="stat"><div class="k">${n===0?"スタート（残高＋日付なしの入出金）":"スタート（"+GROUP_NAMES[n-1]+"の支払い後）"}</div><div class="v num">${yen(g.start)}</div></div>
         <div class="stat"><div class="k">この回のカード引落</div><div class="v num">${yen(g.cardTotal)}</div></div>
+        ${r.showBank ? `<div class="stat"><div class="k">口座だけの残高（支払い後）</div><div class="v num ${g.bankEnd<0?"neg":""}">${yen(g.bankEnd)}</div></div>` : ""}
         ${g.flowNet ? `<div class="stat total"><div class="k">この回の入出金予定（差し引き）</div><div class="v num">${g.flowNet>0?"＋":""}${yen(g.flowNet)}</div></div>` : ""}
       </div>
     </section>
-    ${dues.length ? `<div class="alert amber" style="margin:0 0 12px"><b>日付が来た引落・入出金（${dues.length}件）</b><br>${dues.join("　")}<br><span style="font-size:12px">済んだら、残高を入れ直して、カードは0に・予定は×で消してください。</span></div>` : ""}
-    <section><h2>${name}の流れ</h2>${timelineHTML(startLabel, g.start, g.tl, n===0?"いま":"開始")}</section>
+    ${g.bankShort ? `<div class="alert warn" style="margin:0 0 12px"><b>${g.bankShort.first ? `口座だけでは${md(g.bankShort.first)}の引落で足りません` : n>0 ? "前の回から、口座の不足が続いています" : "口座の残高が最初から足りません"}</b><br>口座へ <b class="num">${yen(g.bankShort.need)}</b> 以上の入金が必要です（現金・株売却などから）。${n>0 && g.bankStart<0 ? "<br><span style=\"font-size:12px\">前の回の不足分も含んだ額です。前の回で口座へ入金し、残高を入れ直すと減ります。</span>" : ""}<br><span style="font-size:12px">現金なども含めた全体では、この回の支払い後 ${yen(g.end)}。</span></div>` : ""}
+    ${dues.length ? `<div class="alert amber" style="margin:0 0 12px"><b>日付が来た引落・入出金（${dues.length}件）</b><br>${dues.join("　")}<br><span style="font-size:12px">済んだものは「済み」ボタンで0に（予定は削除）できます。残高は入れ直してください。</span>
+      <div style="margin-top:6px"><button class="btn small done-btn" data-alldone="${n}">すべて済みにする（${dues.length}件）</button></div></div>` : ""}
+    <section><h2>${name}の流れ</h2>${timelineHTML(startLabel, g.start, g.tl, n===0?"いま":"開始", r.showBank ? g.bankStart : null)}
+      ${r.showBank ? `<div class="hint">右の大きい数字は現金なども含めた全体、「口座」は引落に使える口座だけの残高です（入出金予定は口座に入る・口座から出る扱い）。</div>` : ""}</section>
     <section>
       <h2>${name}のカード引落（${g.label}）</h2>
       ${g.cards.map(x=>{ const st = cardStatus(x, r.today); const due = x.amt ? dueOf(x.withdraw, r.today) : ""; return `
         <div class="row${due?" due":""}">
           <div class="name">
             <div class="n">${esc(x.card.name)}${due ? `<span class="badge due">${due==="today"?"● 今日が引落日":"● 引落日を過ぎています"}</span>` : ""}<span class="badge st-${st.cls}">${st.cls==="closed"?"締め済み":st.cls==="open"?"利用中":"利用前"}</span></div>
-            ${due ? `<div class="due-msg">引落が済んだら、残高を入れ直してここを0にしてください</div>` : ""}
+            ${due ? `<div class="due-msg"><button class="btn small done-btn" data-done="${x.idx}|${x.key}" style="margin:2px 6px 2px 0">済み（0にする）</button>残高も入れ直してください</div>` : ""}
             <div class="meta num"><b>${md(x.withdraw)}引落</b>・${st.text}</div>
           </div>
           <input class="money" inputmode="numeric" data-amt="${x.idx}|${x.key}" value="${fmtInput(x.amt)}" placeholder="0">
@@ -751,10 +777,12 @@ function render(){
         <div class="gap"></div><div class="gap"></div>
         <h2>残高の項目（口座・現金など）</h2>
         ${state.funds.map((f,i)=>`
-          <div class="edit-row fund">
+          <div class="edit-row fund3">
             <input type="text" value="${esc(f.name)}" data-fname="${i}">
+            <label class="chk"><input type="checkbox" data-fbank="${i}"${isBank(f)?" checked":""}> 引落口座</label>
             <button class="x" data-fdel="${i}" title="削除">×</button>
           </div>`).join("")}
+        <div class="hint">「引落口座」にチェックした項目だけで、口座の残高が足りるかを確認します（現金・株売却などはチェックなし）。</div>
         <button class="btn ghost small" id="add-fund">＋ 項目を追加</button>
 
         <div class="gap"></div><div class="gap"></div>
@@ -787,6 +815,29 @@ function bind(){
     if (!x.amount && !x.name || confirm(`「${x.name || (b.dataset.list.startsWith("out") ? "出金予定" : "入金予定")}」を削除しますか？`)){
       list.splice(+b.dataset.idel,1); scheduleSave(); render();
     }
+  });
+  // 期日が来たものを「済み」にする：カードは0に、入出金予定は削除
+  app.querySelectorAll("[data-done]").forEach(b=>b.onclick=()=>{
+    const [i, key] = b.dataset.done.split("|"); const c = state.cards[+i];
+    if (c && c.amts) delete c.amts[key];
+    scheduleSave(); render();
+  });
+  app.querySelectorAll("[data-flowdone]").forEach(b=>b.onclick=()=>{
+    const [list, i] = b.dataset.flowdone.split("|"); incList(list).splice(+i, 1);
+    scheduleSave(); render();
+  });
+  app.querySelectorAll("[data-alldone]").forEach(b=>b.onclick=()=>{
+    const r = compute(), g = r.groups[+b.dataset.alldone];
+    const cards = g.cards.filter(x=>x.amt && dueOf(x.withdraw, r.today));
+    const flowDue = x => +x.amount && dueOf(parseYMD(x.date), r.today);
+    const nFlows = +b.dataset.alldone === 0 ? state.incomes.filter(flowDue).length + state.outgoes.filter(flowDue).length : 0;
+    if (!confirm(`日付が来た${cards.length + nFlows}件を済みにしますか？（カードは0に、入出金予定は削除）\n残高は入れ直してください。`)) return;
+    cards.forEach(x=>{ delete x.card.amts[x.key]; });
+    if (+b.dataset.alldone === 0){
+      state.incomes = state.incomes.filter(x=>!flowDue(x));
+      state.outgoes = state.outgoes.filter(x=>!flowDue(x));
+    }
+    scheduleSave(); render();
   });
   app.querySelectorAll("[data-idate]").forEach(el=>el.addEventListener("change", ()=>{
     incList(el.dataset.list)[+el.dataset.idate].date = el.value || ""; scheduleSave(); render();
@@ -825,6 +876,7 @@ function bind(){
   onEdit("[data-cclose]", el=>state.cards[+el.dataset.cclose].closing = Math.min(31, Math.max(0, parseInt(el.value,10)||0)));
   onEdit("[data-cwd]", el=>state.cards[+el.dataset.cwd].withdraw = Math.min(31, Math.max(1, parseInt(el.value,10)||1)));
   onEdit("[data-fname]", el=>state.funds[+el.dataset.fname].name = el.value.trim() || "項目");
+  onEdit("[data-fbank]", el=>{ state.funds[+el.dataset.fbank].bank = el.checked; });
   onEdit("#group-day", el=>{ state.groupDay = Math.min(28, Math.max(2, parseInt(el.value,10)||11)); });
   app.querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{
     const c = state.cards[+b.dataset.cdel];
