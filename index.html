@@ -199,6 +199,14 @@
   .row.due{background:var(--amber-soft);margin:0 -14px;padding:8px 14px}
   .badge.due{background:var(--amber);color:#fff}
   .due-msg{font-size:11.5px;color:var(--amber);margin-top:2px}
+  .status{border-radius:12px;padding:10px 12px;margin:0 0 12px;font-size:13.5px}
+  .status b{font-size:14px}
+  .status div{margin-top:3px;font-size:13px}
+  .status.st-ok{background:var(--accent-soft);color:var(--accent)}
+  .status.st-move{background:var(--amber-soft);color:var(--amber)}
+  .status.st-short{background:var(--warn-soft);color:var(--warn)}
+  .tabmark{margin-left:3px;font-weight:800}
+  .tm-ok{color:var(--accent)} .tm-move{color:var(--amber)} .tm-short{color:var(--warn)}
   .done-btn{padding:4px 10px;font-size:12px;margin-left:4px;vertical-align:middle}
   .tl-bank{font-size:11.5px;color:var(--sub);text-align:right}
   .tl-bank.neg{color:var(--warn);font-weight:700}
@@ -533,6 +541,13 @@ function compute(){
     const firstNeg = lows.find(x=>x.bank < 0);
     g.bankShort = minLow.bank < 0 ? { first:firstNeg.date, need:-minLow.bank } : null;
     bankStart = g.bankEnd;
+    // 全体（現金など込み）の不足
+    const tLows = [{ date:null, bal:g.start }, ...g.tl.map(t=>({ date:t.date, bal:t.balance }))];
+    const tMin = tLows.reduce((a,x)=>x.bal < a.bal ? x : a, tLows[0]);
+    const tFirst = tLows.find(x=>x.bal < 0);
+    g.totalShort = tMin.bal < 0 ? { first:tFirst.date, need:-tMin.bal } : null;
+    // 状態：ok＝足りている / move＝全体では足りるが口座へ入金が必要 / short＝全体で不足
+    g.status = g.totalShort ? "short" : g.bankShort ? "move" : "ok";
     const wds = cards.map(x=>x.withdraw).sort((a,b)=>a-b);
     g.label = wds.length ? `${md(wds[0])}〜${md(wds[wds.length-1])}` : "";
     start = g.end;
@@ -637,6 +652,21 @@ function cardStatus(x, today){
   }
   return { cls:"before", text:`${md(x.start)}〜${md(x.end)}利用（まだ始まっていません）` };
 }
+const STATUS_MARK = { ok:"○", move:"△", short:"×" };
+function statusHTML(g, n){
+  const carryNote = start => n > 0 && start < 0 ? "（前の回の不足分も含む）" : "";
+  if (g.status === "short"){
+    const s = g.totalShort;
+    return `<div class="status st-short"><b>× ${s.first ? md(s.first) + "の引落で" : "最初から"}、現金なども含めた全体で足りません</b>
+      <div>あと <b class="num">${yen(s.need)}</b> 必要です${carryNote(g.start)}。入金予定を追加するか、支払いを見直してください。</div></div>`;
+  }
+  if (g.status === "move"){
+    const s = g.bankShort;
+    return `<div class="status st-move"><b>△ 全体では足りていますが、${s.first ? md(s.first) + "の引落で" : "最初から"}口座が足りません</b>
+      <div>現金・株売却などから口座へ <b class="num">${yen(s.need)}</b> 以上入金してください${carryNote(g.bankStart)}。</div></div>`;
+  }
+  return `<div class="status st-ok"><b>○ この回は足りています</b>（口座だけでも足ります）</div>`;
+}
 function groupViewHTML(r, n){
   const g = r.groups[n], name = GROUP_NAMES[n];
   const cls = g.end < 0 ? "neg" : "pos";
@@ -646,21 +676,19 @@ function groupViewHTML(r, n){
     .filter(x=>+x.amount && dueOf(parseYMD(x.date), r.today)).map(x=>`${x.k}：${esc(x.name||"予定")} ${yen(+x.amount)}`) : [];
   const dues = dueCards.concat(dueFlows);
   return `
+    ${statusHTML(g, n)}
     <section class="hero">
       <div class="label">${name}の支払い後の残高（${g.label}の引落）</div>
       <div class="big num ${cls}">${yen(g.end)}</div>
       <div class="stats">
         <div class="stat"><div class="k">${n===0?"スタート（残高＋日付なしの入出金）":"スタート（"+GROUP_NAMES[n-1]+"の支払い後）"}</div><div class="v num">${yen(g.start)}</div></div>
         <div class="stat"><div class="k">この回のカード引落</div><div class="v num">${yen(g.cardTotal)}</div></div>
-        ${r.showBank ? `<div class="stat"><div class="k">口座だけの残高（支払い後）</div><div class="v num ${g.bankEnd<0?"neg":""}">${yen(g.bankEnd)}</div></div>` : ""}
         ${g.flowNet ? `<div class="stat total"><div class="k">この回の入出金予定（差し引き）</div><div class="v num">${g.flowNet>0?"＋":""}${yen(g.flowNet)}</div></div>` : ""}
       </div>
     </section>
-    ${g.bankShort ? `<div class="alert warn" style="margin:0 0 12px"><b>${g.bankShort.first ? `口座だけでは${md(g.bankShort.first)}の引落で足りません` : n>0 ? "前の回から、口座の不足が続いています" : "口座の残高が最初から足りません"}</b><br>口座へ <b class="num">${yen(g.bankShort.need)}</b> 以上の入金が必要です（現金・株売却などから）。${n>0 && g.bankStart<0 ? "<br><span style=\"font-size:12px\">前の回の不足分も含んだ額です。前の回で口座へ入金し、残高を入れ直すと減ります。</span>" : ""}<br><span style="font-size:12px">現金なども含めた全体では、この回の支払い後 ${yen(g.end)}。</span></div>` : ""}
     ${dues.length ? `<div class="alert amber" style="margin:0 0 12px"><b>日付が来た引落・入出金（${dues.length}件）</b><br>${dues.join("　")}<br><span style="font-size:12px">済んだものは「済み」ボタンで0に（予定は削除）できます。残高は入れ直してください。</span>
       <div style="margin-top:6px"><button class="btn small done-btn" data-alldone="${n}">すべて済みにする（${dues.length}件）</button></div></div>` : ""}
-    <section><h2>${name}の流れ</h2>${timelineHTML(startLabel, g.start, g.tl, n===0?"いま":"開始", r.showBank ? g.bankStart : null)}
-      ${r.showBank ? `<div class="hint">右の大きい数字は現金なども含めた全体、「口座」は引落に使える口座だけの残高です（入出金予定は口座に入る・口座から出る扱い）。</div>` : ""}</section>
+    <section><h2>${name}の流れ</h2>${timelineHTML(startLabel, g.start, g.tl, n===0?"いま":"開始")}</section>
     <section>
       <h2>${name}のカード引落（${g.label}）</h2>
       ${g.cards.map(x=>{ const st = cardStatus(x, r.today); const due = x.amt ? dueOf(x.withdraw, r.today) : ""; return `
@@ -739,7 +767,7 @@ function render(){
     ${headerHTML()}
 
     <div class="tabs four">
-      ${[0,1,2].map(n=>`<button data-view="g${n}" class="${VIEW==="g"+n?"on":""}">${GROUP_NAMES[n]}<small class="num">${r.groups[n].label}</small></button>`).join("")}
+      ${[0,1,2].map(n=>`<button data-view="g${n}" class="${VIEW==="g"+n?"on":""}">${GROUP_NAMES[n]}<span class="tabmark tm-${r.groups[n].status}">${STATUS_MARK[r.groups[n].status]}</span><small class="num">${r.groups[n].label}</small></button>`).join("")}
       <button data-view="sim" class="${VIEW==="sim"?"on":""}">いつ払い？<small>買う日で確認</small></button>
     </div>
 
