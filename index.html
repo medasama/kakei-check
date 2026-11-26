@@ -941,11 +941,12 @@ const isKakeiView = () => KAKEI_VIEWS.includes(VIEW);
 
 function defaultKakei(){
   return {
-    v:3,
+    v:5,
     cats: [
       { id:"h_food",    name:"食費",         group:"house", budget:110000 },
       { id:"h_daily",   name:"日用品",       group:"house", budget:10000 },
       { id:"h_alcohol", name:"お酒",         group:"house", budget:20000 },
+      { id:"h_luxury",  name:"嗜好品",       group:"house", budget:0 },
       { id:"h_net",     name:"インターネット", group:"house", budget:4180 },
       { id:"h_leisure", name:"レジャー",     group:"house", budget:0 },
       { id:"h_other",   name:"その他",       group:"house", budget:20000 },
@@ -961,6 +962,7 @@ function defaultKakei(){
       { id:"s_appgift", name:"Appleギフト",  group:"self" },
       { id:"s_other",   name:"その他",       group:"self" },
       { id:"x_skip",    name:"対象外",       group:"skip" },
+      { id:"x_dup",     name:"楽天の重複で除外", group:"skip" },
       { id:"x_invest",  name:"投資（家計外）", group:"skip" },
     ],
     // MFの大項目／中項目 → カテゴリ（空欄はどれでも）
@@ -1002,6 +1004,20 @@ function upgradeKakei(K){
     }
     if (!K.rules.some(r=>nk(r.kw)===nk("Apple Gift Card"))) K.rules.unshift({ id:"r6", kw:"Apple Gift Card", src:"all", cat:"s_appgift" });
     K.v = 3;
+  }
+  if (K.v < 4){
+    if (!K.cats.some(c=>c.id==="x_dup")){
+      const at = K.cats.findIndex(c=>c.id==="x_skip");
+      K.cats.splice(at >= 0 ? at + 1 : K.cats.length, 0, { id:"x_dup", name:"楽天の重複で除外", group:"skip" });
+    }
+    K.v = 4;
+  }
+  if (K.v < 5){
+    if (!K.cats.some(c=>c.id==="h_luxury")){
+      const at = K.cats.findIndex(c=>c.id==="h_alcohol");
+      K.cats.splice(at >= 0 ? at + 1 : K.cats.length, 0, { id:"h_luxury", name:"嗜好品", group:"house", budget:0 });
+    }
+    K.v = 5;
   }
 }
 function upgradeKakeiV2(K){
@@ -1047,6 +1063,12 @@ async function loadMonth(ym, force=false){
     catch(e){ throw new Error(ymLabel(ym) + "のデータを読めませんでした。"); }
   }
   MONTHS[ym] = { ...(MONTHS[ym]||{}), data, id };
+  // 以前「二重計上の可能性」で除外した楽天の行（対象外）を「楽天の重複で除外」に移す
+  if (!data.dupMigrated){
+    (data.mf||[]).forEach(r=>{ const k = "m:" + r.id; if (data.ov[k] === "x_skip" && (isMarketSrc(r) || isCardMarket(r))) data.ov[k] = "x_dup"; });
+    data.dupMigrated = true;
+    if (payload) saveMonthSoon(ym);
+  }
   return data;
 }
 function saveMonthSoon(ym){
@@ -1447,7 +1469,7 @@ function kakeiViewHTML(data){
     <section>
       <h2>集計しないもの</h2>
       ${cats("skip").map(c=>catBlockHTML(c,k,false,el)).join("")}
-      <div class="hint">マネーフォワードで計算対象外・振替の行は集計しません。「二重計上の可能性」で除外した行はここに入ります。</div>
+      <div class="hint">「楽天の重複で除外」は「二重計上の可能性」で除外した行、「対象外」はそれ以外の理由で外した行です。マネーフォワードで計算対象外・振替の行は、どちらにも入らず集計しません。</div>
     </section>
     ${kakeiSettingsHTML()}`;
 }
@@ -1496,7 +1518,7 @@ function kakeiSettingsHTML(){
             <input type="text" value="${esc(c.name)}" data-kcname="${i}">
             <span class="sim-sub">${c.group==="house"?"家計":c.group==="self"?"個人":"対象外"}</span>
             ${c.group!=="skip" ? `<input type="text" inputmode="numeric" class="money sm" data-kcbud="${i}" value="${fmtInput(c.budget)}" placeholder="目標">` : `<span></span>`}
-            ${["h_other","x_skip"].includes(c.id) ? `<span></span>` : `<button class="x" data-kcdel="${i}" title="削除">×</button>`}
+            ${["h_other","x_skip","x_dup"].includes(c.id) ? `<span></span>` : `<button class="x" data-kcdel="${i}" title="削除">×</button>`}
           </div>`).join("")}
         <div class="flex"><button class="btn ghost small" data-kcadd="house">＋ 家計</button><button class="btn ghost small" data-kcadd="self">＋ 個人</button><button class="btn ghost small" data-kcadd="skip">＋ 対象外</button></div>
 
@@ -1645,7 +1667,7 @@ function bindKakei(){
     const [l, m] = el.dataset.mapadd.split("|");
     K.mfMap.unshift({ l, m, cat: el.value }); saveS();
   }));
-  app.querySelectorAll("[data-dupex]").forEach(b=>b.onclick=()=>{ b.dataset.dupex.split(",").forEach(k=>data.ov[k] = "x_skip"); saveMonthSoon(KYM); render(); });
+  app.querySelectorAll("[data-dupex]").forEach(b=>b.onclick=()=>{ b.dataset.dupex.split(",").forEach(k=>data.ov[k] = "x_dup"); saveMonthSoon(KYM); render(); });
   app.querySelectorAll("[data-dupok]").forEach(b=>b.onclick=()=>{ data.ok = data.ok || {}; data.ok[b.dataset.dupok] = true; saveMonthSoon(KYM); render(); });
   const onK = (sel, fn) => app.querySelectorAll(sel).forEach(el=>el.addEventListener("change", ()=>{ fn(el); saveS(); }));
   onK("[data-kcname]", el=>K.cats[+el.dataset.kcname].name = el.value.trim() || "カテゴリ");
