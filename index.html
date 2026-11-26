@@ -207,6 +207,9 @@
   .status.st-short{background:var(--warn-soft);color:var(--warn)}
   .tabmark{margin-left:3px;font-weight:800}
   .tm-ok{color:var(--accent)} .tm-move{color:var(--amber)} .tm-short{color:var(--warn)}
+  .hero-sub{font-size:12.5px;color:var(--sub);margin-top:-2px}
+  .stat .s{font-size:11px;color:var(--sub);margin-top:1px}
+  details.earned{margin:4px 0 8px} details.earned summary{font-size:13px}
   .done-btn{padding:4px 10px;font-size:12px;margin-left:4px;vertical-align:middle}
   .tl-bank{font-size:11.5px;color:var(--sub);text-align:right}
   .tl-bank.neg{color:var(--warn);font-weight:700}
@@ -1026,7 +1029,7 @@ let RULE_DRAFT = null;
 
 /* ---------- 月ごとのデータ保存 ---------- */
 const MONTHS = {};   // ym → { data, id, timer, loading }
-const freshMonth = () => ({ v:1, mf:[], pts:[], ov:{}, incomes:[], updatedAt:null });
+const freshMonth = () => ({ v:1, mf:[], pts:[], earned:[], ov:{}, incomes:[], updatedAt:null });
 async function monthId(ym){ return sha256Hex("cashflow-tool:" + PASS + ":kakei:" + ym); }
 async function loadMonth(ym, force=false){
   if (MONTHS[ym] && MONTHS[ym].data && !force) return MONTHS[ym].data;
@@ -1128,7 +1131,7 @@ function parsePoints(text){
   const toks = String(text).normalize("NFKC").split(/[\t\r\n]+/).map(s=>s.trim()).filter(Boolean);
   const isY = t => /^\d{4}$/.test(t), isMD = t => /^\d{1,2}\/\d{1,2}$/.test(t), isYMD = t => /^\d{4}\s+\d{1,2}\/\d{1,2}$/.test(t);
   const startAt = i => (isY(toks[i]) && isMD(toks[i+1]||"")) ? 2 : isYMD(toks[i]) ? 1 : 0;
-  const out = []; let skipped = 0, i = 0;
+  const out = [], earned = []; let skipped = 0, i = 0;
   while (i < toks.length){
     const s = startAt(i);
     if (!s){ i++; continue; }
@@ -1154,27 +1157,38 @@ function parsePoints(text){
     }
     if (amt == null) continue;
     const status = st.join(" ");
-    if (/獲得|取消|キャンセル/.test(status) || !/利用/.test(status)){ skipped++; continue; }
+    if (/取消|キャンセル/.test(status)){ skipped++; continue; }
+    if (/獲得/.test(status)){ earned.push({ d, svc, t: content.join(""), st: status, amt, pending: /予定/.test(status) }); continue; }
+    if (!/利用/.test(status)){ skipped++; continue; }
     out.push({ d, svc, t: content.join(""), st: status, amt });
   }
   // 同じ日・同じ内容・同じ額が複数ある場合も区別できるよう、出現順の番号を付ける
-  const seen = {};
-  out.forEach(r=>{ const base = [r.d, r.svc, r.t, r.amt].join("|"); seen[base] = (seen[base]||0) + 1; r.key = base + "#" + seen[base]; });
-  return { recs: out, skipped };
+  const addKeys = list => { const seen = {}; list.forEach(r=>{ const base = [r.d, r.svc, r.t, r.amt].join("|"); seen[base] = (seen[base]||0) + 1; r.key = base + "#" + seen[base]; }); };
+  addKeys(out); addKeys(earned);
+  return { recs: out, earned, skipped };
 }
 async function importPoints(text){
-  const { recs, skipped } = parsePoints(text);
-  if (!recs.length) throw new Error("ポイント利用の行を読み取れませんでした。楽天PointClubの「ポイント実績」ページの表を、日付の列から選択してコピーしてください。");
+  const { recs, earned, skipped } = parsePoints(text);
+  if (!recs.length && !earned.length) throw new Error("ポイント利用の行を読み取れませんでした。楽天PointClubの「ポイント実績」ページの表を、日付の列から選択してコピーしてください。");
   const byM = {};
   recs.forEach(r=>{ (byM[ymOf(r.d)] = byM[ymOf(r.d)] || []).push(r); });
-  let added = 0, dup = 0;
-  for (const ym of Object.keys(byM)){
+  const byE = {};
+  earned.forEach(r=>{ (byE[ymOf(r.d)] = byE[ymOf(r.d)] || []).push(r); });
+  let added = 0, dup = 0, eAdded = 0;
+  for (const ym of new Set([...Object.keys(byM), ...Object.keys(byE)])){
     const data = await loadMonth(ym);
+    data.earned = data.earned || [];
     const keys = new Set(data.pts.map(p=>p.key));
-    byM[ym].forEach(r=>{ if (keys.has(r.key)) dup++; else { data.pts.push(r); keys.add(r.key); added++; } });
+    (byM[ym]||[]).forEach(r=>{ if (keys.has(r.key)) dup++; else { data.pts.push(r); keys.add(r.key); added++; } });
+    // 獲得：同じ行は上書き（「獲得予定」→「獲得」に変わった場合も最新の状態にする）
+    (byE[ym]||[]).forEach(r=>{
+      const i = data.earned.findIndex(x=>x.key === r.key);
+      if (i >= 0) data.earned[i] = r; else { data.earned.push(r); eAdded++; }
+    });
     saveMonthSoon(ym);
   }
-  return { added, dup, skipped, months: Object.keys(byM).sort() };
+  const months = [...new Set([...Object.keys(byM), ...Object.keys(byE)])].sort();
+  return { added, dup, skipped, eAdded, months };
 }
 
 /* ---------- 振り分け ---------- */
@@ -1234,7 +1248,12 @@ function computeKakei(data){
   txs.forEach(t=>{ const b = byCat[t.cat]; if (!b) return; b.total += t.spend; if (t.kind==="pt") b.pts += t.spend; b.list.push(t); });
   const sumG = g => state.kakei.cats.filter(c=>c.group===g).reduce((a,c)=>a+byCat[c.id].total,0);
   const house = sumG("house"), self = sumG("self");
+  const ptsG = g => state.kakei.cats.filter(c=>c.group===g).reduce((a,c)=>a+byCat[c.id].pts,0);
+  const housePts = ptsG("house"), selfPts = ptsG("self");     // ポイント利用分（収入としても扱う）
   const income = (data.incomes||[]).reduce((a,x)=>a+(+x.amount||0),0);
+  const earned = data.earned || [];
+  const earnedTotal = earned.filter(x=>!x.pending).reduce((a,x)=>a+x.amt,0);
+  const earnedPending = earned.filter(x=>x.pending).reduce((a,x)=>a+x.amt,0);
   const counted = t => catById(t.cat) && catById(t.cat).group !== "skip";
   const dups = findDups(txs, counted, data);
   // 対応表にないマネーフォワードの項目
@@ -1243,7 +1262,7 @@ function computeKakei(data){
     const k = t.raw.l + "|" + t.raw.m; um[k] = um[k] || { l:t.raw.l, m:t.raw.m, n:0, sum:0 }; um[k].n++; um[k].sum += t.spend;
   });
   const unassigned = txs.filter(t=>t.how==="default").length;
-  return { txs, byCat, house, self, income, balance: income - house, dups, unmapped: Object.values(um), unassigned, marketRows };
+  return { txs, byCat, house, self, housePts, selfPts, earnedTotal, earnedPending, income, balance: income + housePts - house, dups, unmapped: Object.values(um), unassigned, marketRows };
 }
 // 二重計上の可能性：楽天カード側の楽天市場の行と、楽天市場側の「同じ日・同じ店の注文」の両方が数えられていて、
 // 前後3日以内かつ（金額が一致 または 店名が一致）するもの。1つの注文は1つの組にだけ入れる。
@@ -1362,12 +1381,14 @@ function kakeiViewHTML(data){
     <section class="hero">
       <div class="label">家計の支出（${ymLabel(KYM)}・${Math.round(el*100)}%経過）</div>
       <div class="big num">${yen(k.house)}</div>
+      <div class="hero-sub num">うち ポイント ${yen(k.housePts)}／現金・カード ${yen(k.house - k.housePts)}</div>
       <div class="stats">
-        <div class="stat total"><div class="k">家計＋個人の合計</div><div class="v num">${yen(k.house + k.self)}</div></div>
-        <div class="stat"><div class="k">個人の支出</div><div class="v num">${yen(k.self)}</div></div>
-        <div class="stat"><div class="k">家計の収支（入金−家計支出）</div><div class="v num ${k.balance<0?"neg":""}">${yen(k.balance)}</div></div>
+        <div class="stat total"><div class="k">家計＋個人の合計</div><div class="v num">${yen(k.house + k.self)}</div><div class="s num">うちポイント ${yen(k.housePts + k.selfPts)}</div></div>
+        <div class="stat"><div class="k">個人の支出</div><div class="v num">${yen(k.self)}</div><div class="s num">うちポイント ${yen(k.selfPts)}</div></div>
+        <div class="stat"><div class="k">家計の収支</div><div class="v num ${k.balance<0?"neg":""}">${yen(k.balance)}</div><div class="s num">入金 ${yen(k.income)} ＋ ポイント ${yen(k.housePts)} − 家計支出 ${yen(k.house)}</div></div>
         <div class="stat"><div class="k">家計の目標合計</div><div class="v num">${yen(cats("house").reduce((a,c)=>a+(+c.budget||0),0))}</div></div>
         <div class="stat"><div class="k">入金合計</div><div class="v num">${yen(k.income)}</div></div>
+        <div class="stat total"><div class="k">この月の獲得ポイント（参考）</div><div class="v num">${k.earnedTotal.toLocaleString("ja-JP")} pt</div>${k.earnedPending ? `<div class="s num">ほかに獲得予定 ${k.earnedPending.toLocaleString("ja-JP")} pt</div>` : (k.earnedTotal ? "" : `<div class="s">ポイントタブで履歴を貼り付けると集計されます</div>`)}</div>
       </div>
     </section>
 
@@ -1419,6 +1440,7 @@ function kakeiViewHTML(data){
 
     <section>
       <h2 class="sec-h">個人<span class="num">${yen(k.self)}${budgetSum("self") ? ` / 目標 ${yen(budgetSum("self"))}` : ""}</span></h2>
+      ${k.selfPts ? `<div class="hint" style="margin:0 0 6px">うちポイント利用 ${yen(k.selfPts)}（収入扱い。家計の収支には含めません）</div>` : ""}
       ${cats("self").map(c=>catBlockHTML(c,k,true,el)).join("")}
     </section>
 
@@ -1439,11 +1461,18 @@ function pointsViewHTML(data){
       <textarea class="paste" id="pt-text" placeholder="楽天PointClub「ポイント実績」の表を、日付の列からポイント数の列まで選択してコピーし、ここに貼り付け"></textarea>
       <button class="btn" id="pt-import" style="margin-top:8px;width:100%">取り込む</button>
       ${PT_MSG ? `<div class="alert ${PT_MSG_ERR?"warn":"info"}" style="margin-top:8px">${esc(PT_MSG)}</div>` : ""}
-      <div class="hint">前回と期間が重なっていても、同じ行は二重に数えません。獲得ポイントの行は自動で除きます。<br>店名などのルールで自動振り分けし、ルールにないものは「家計・その他」（未振り分け）に入ります。</div>
+      <div class="hint">前回と期間が重なっていても、同じ行は二重に数えません。獲得ポイントの行は、支出には入れず「獲得ポイント」として別に集計します。<br>店名などのルールで自動振り分けし、ルールにないものは「家計・その他」（未振り分け）に入ります。</div>
     </section>
     ${monthNavHTML()}
     <section>
-      <h2>${ymLabel(KYM)}のポイント利用（集計分 ${yen(total)}）</h2>
+      <div class="budget-sum num" style="grid-template-columns:1fr 1fr">
+        <div><span>利用（集計分）</span><b>${yen(total)}</b></div>
+        <div class="all"><span>獲得${k.earnedPending?`（ほかに予定 ${k.earnedPending.toLocaleString("ja-JP")}pt）`:""}</span><b>${k.earnedTotal.toLocaleString("ja-JP")} pt</b></div>
+      </div>
+      ${(data.earned||[]).length ? `<details class="earned" id="d-earned"><summary>獲得ポイントの明細（${data.earned.length}件）</summary>
+        ${data.earned.slice().sort((a,b)=>b.d.localeCompare(a.d)).map(x=>`<div class="tx"><div class="tx-top"><span class="tx-d num">${mdS(x.d)}</span><span class="tx-t">${x.svc?"［"+esc(x.svc)+"］":""}${esc(x.t)}${x.pending?` <span class="tag">予定</span>`:""}</span><span class="tx-a num">${x.amt.toLocaleString("ja-JP")}pt</span></div></div>`).join("")}
+      </details>` : ""}
+      <h2 style="margin-top:12px">${ymLabel(KYM)}のポイント利用</h2>
       ${pts.length ? pts.map(t=>txHTML(t,k)).join("") : `<div class="hint">この月のポイント利用はありません。</div>`}
     </section>
     ${kakeiSettingsHTML()}`;
@@ -1571,7 +1600,7 @@ function bindKakei(){
     try{
       const r = await importPoints(text);
       KYM = r.months[r.months.length-1];
-      PT_MSG = `新しく${r.added}件を取り込みました${r.dup?`（重複${r.dup}件は除外）`:""}${r.skipped?`／獲得などの行${r.skipped}件は対象外`:""}。`; PT_MSG_ERR = false;
+      PT_MSG = `利用：新しく${r.added}件${r.dup?`（重複${r.dup}件は除外）`:""}／獲得：新しく${r.eAdded}件を取り込みました${r.skipped?`（取消などの行${r.skipped}件は対象外）`:""}。`; PT_MSG_ERR = false;
     }catch(e){ PT_MSG = e.message; PT_MSG_ERR = true; }
     render();
   };
